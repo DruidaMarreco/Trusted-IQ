@@ -308,11 +308,13 @@ async def _evaluate_model(
     return score
 
 
-def _render_report(scores: list[ModelScore], intent_n: int, timestamp: str) -> str:
+def _render_report(scores: list[ModelScore], intent_n: int, timestamp: str, scope: str) -> str:
     lines = [
         "# TradeIQ TPO — Model Evaluation",
         "",
         f"Generated: {timestamp} · Intent cases: {intent_n} · Grounded response cases: {len(GROUNDED_CASES)}",
+        "",
+        f"_{scope}_",
         "",
         "| Model | Intent acc. | Groundedness /5 | Figure overlap | Relevance /5 | Format /5 "
         "| Avg latency (ms) | Cost (USD) | Tokens | Value | Composite |",
@@ -364,7 +366,7 @@ def _svg_bars(ranked: list[ModelScore]) -> str:
     return f'<svg width="520" height="{max(y, 1)}" role="img" aria-label="composite scores">{"".join(parts)}</svg>'
 
 
-def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str) -> str:
+def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str, scope: str) -> str:
     ranked = sorted(scores, key=lambda x: -x.composite)
     if not ranked:
         return "<!doctype html><html><body><p>No results.</p></body></html>\n"
@@ -417,6 +419,7 @@ def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str) -> str
 <h1>TradeIQ TPO — Model Evaluation</h1>
 <div class="meta">Generated: {timestamp} &middot; Intent cases: {intent_n}
 &middot; Grounded cases: {len(GROUNDED_CASES)}</div>
+<div class="meta"><strong>Scope:</strong> {html.escape(scope)}</div>
 <div class="rec"><strong>Recommended:</strong> {html.escape(best.name)} (composite {best.composite:.3f})</div>
 <h2>Composite score</h2>
 {_svg_bars(ranked)}
@@ -699,11 +702,21 @@ async def run_evaluation(intent_sample: int, output_path: Path, backend: str) ->
         print(f"\n▶ {name}")
         scores.append(await _evaluate_model(name, llm, judge, intent_cases))
 
+    names = ", ".join(s.name for s in scores)
+    if backend == "claude_code":
+        scope = (
+            f"Claude family only ({names}), via the Claude Code subscription quota. "
+            "GPT and Gemini are NOT included — they require metered API keys: run "
+            "`--backend providers` with the relevant keys to add them."
+        )
+    else:
+        scope = f"Metered provider APIs ({backend}): {names}."
+
     n = len(intent_cases)
     stem = output_path.with_suffix("")  # e.g. results/model_eval
     stem.parent.mkdir(parents=True, exist_ok=True)
-    report = _render_report(scores, n, timestamp)
-    html_doc = _render_html(scores, n, timestamp)
+    report = _render_report(scores, n, timestamp, scope)
+    html_doc = _render_html(scores, n, timestamp, scope)
     json_doc = _export_json(scores, n, timestamp, backend)
     history = _append_history(scores, timestamp, stem.with_name("model_eval_history.csv"))
 
