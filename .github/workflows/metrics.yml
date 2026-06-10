@@ -1,0 +1,77 @@
+# =============================================================================
+# METRICS WORKFLOW  --  DISABLED (entirely commented out; never triggers)
+# =============================================================================
+# Mass model-quality testing. Runs scripts/benchmark_models.py, which benchmarks
+# and COMPARES the LLM models listed in that script's MODELS registry across:
+#   - reasoning / decomposition quality (LLM-as-judge)
+#   - tool-calling accuracy
+#   - intent-routing accuracy vs the ground-truth (GT) dataset
+#   - latency and cost per query
+# and writes a side-by-side comparison report to results/benchmark.md.
+#
+# To ENABLE this workflow:
+#   1. Remove the leading "# " from every line below the banner.
+#   2. Add the LLM provider API keys as repository secrets (see the env: block).
+#   3. Make the GT dataset available to CI. tests/data/ is currently gitignored
+#      (the `data/` rule in trade-iq-pod/.gitignore), so the runner cannot read
+#      tests/data/intent_dataset.json. Add an exception such as `!tests/data/`
+#      and commit the dataset(s) — expand intent_dataset.json (or add more GT
+#      files) for true "mass" testing.
+#   4. To compare a different set of models, edit the MODELS registry in
+#      scripts/benchmark_models.py.
+# =============================================================================
+#
+# name: Metrics
+#
+# on:
+#   # Manual runs only — benchmarking calls paid LLM APIs, so it should be
+#   # deliberate. Uncomment the schedule block for periodic runs once stable.
+#   workflow_dispatch:
+#     inputs:
+#       runs:
+#         description: "Runs per task per model (higher = more stable averages)"
+#         required: false
+#         default: "3"
+#   # schedule:
+#   #   - cron: "0 6 * * 1"   # 06:00 UTC every Monday
+#
+# permissions:
+#   contents: read
+#
+# concurrency:
+#   group: metrics-${{ github.ref }}
+#   cancel-in-progress: true
+#
+# jobs:
+#   benchmark:
+#     name: Model benchmark (GT mass test + comparison)
+#     runs-on: ubuntu-latest
+#     defaults:
+#       run:
+#         working-directory: trade-iq-project/trade-iq-project/trade-iq-pod
+#     env:
+#       # Provide only the providers you want to benchmark. A missing/empty key
+#       # makes that provider's models error out and score 0 in the report.
+#       AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+#       AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+#       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+#       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+#       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+#     steps:
+#       - uses: actions/checkout@v4
+#       - name: Set up uv
+#         uses: astral-sh/setup-uv@v5
+#         with:
+#           enable-cache: true
+#           cache-dependency-glob: trade-iq-project/trade-iq-project/trade-iq-pod/uv.lock
+#       - name: Install dependencies
+#         run: uv sync --group dev
+#       - name: Run benchmark (model comparison vs ground-truth dataset)
+#         run: uv run python scripts/benchmark_models.py --runs "${{ github.event.inputs.runs || '3' }}" --output results/benchmark.md
+#       - name: Upload benchmark report
+#         if: always()
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: model-benchmark
+#           path: trade-iq-project/trade-iq-project/trade-iq-pod/results/benchmark.md
+#           if-no-files-found: warn
