@@ -45,23 +45,26 @@ make format        # black
 make type-check    # ty
 make test          # unit tests + coverage
 make audit         # pip-audit dependency scan
-make benchmark     # LLM benchmark (set RUNS=N)
+make evaluate      # TradeIQ model evaluation
 ```
 
-### Model benchmark
+### Model evaluation
 
-`make benchmark` compares models on the ground-truth dataset (reasoning +
-intent routing) and writes `results/benchmark.md`. By default it runs
-`--backend claude_code`: the Claude model family (Opus / Sonnet / Haiku) is
-called **through Claude Code, billed to your subscription quota** rather than a
-metered API key.
+`make evaluate` runs the **GenAI Sales Assistant flow** (Intent Classifier →
+mock TextToSQL/Optimizer tool → grounded Response Generator) for each candidate
+model and scores them on **intent accuracy, groundedness, relevance and
+format**, writing `results/model_eval.md` to pick the best model(s).
+Groundedness is judged both by an LLM rubric and a deterministic figure-overlap
+check (the answer's numbers must appear in the tool output — no fabrication).
 
-- **Local:** just be logged in to the `claude` CLI — auth is automatic.
+By default it runs `--backend claude_code`: the Claude family (Opus / Sonnet /
+Haiku) is called **through Claude Code, billed to your subscription quota**.
+
+- **Local:** be logged in to the `claude` CLI — auth is automatic.
 - **CI / headless:** set `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`)
   and leave `ANTHROPIC_API_KEY` unset (it would override the subscription).
-- To benchmark the metered multi-provider set instead, run
-  `uv run python scripts/benchmark_models.py --backend providers` with the
-  relevant provider API keys set.
+- To evaluate the metered multi-provider set instead:
+  `uv run python scripts/evaluate_models.py --backend providers`.
 
 ## Documentation
 
