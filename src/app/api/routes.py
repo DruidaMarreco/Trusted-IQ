@@ -1,5 +1,7 @@
 """FastAPI router — agent endpoints."""
 
+import json
+
 from fastapi import APIRouter, HTTPException
 
 from app.agents.orchestrator import OrchestratorAgent
@@ -23,7 +25,12 @@ async def invoke_agent(request: AgentRequest) -> AgentResponse:
     if _orchestrator is None:
         raise HTTPException(status_code=503, detail="Orchestrator not initialised")
     try:
-        result = await _orchestrator.run(request.query)
+        result = await _orchestrator.run(
+            request.query,
+            history=json.dumps(request.history or []),
+            account_scope=request.account_scope or "",
+            planning_period=request.planning_period or "",
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
