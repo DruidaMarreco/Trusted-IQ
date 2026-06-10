@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+MSG_FILE="$1"
+MSG=$(cat "$MSG_FILE")
+
+if echo "$MSG" | grep -qE "^(Merge|Revert) "; then exit 0; fi
+
+PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?(!)?: .{1,}"
+
+if ! echo "$MSG" | grep -qE "$PATTERN"; then
+  echo ""
+  echo "❌ Commit message does not follow Conventional Commits."
+  echo "   Format: <type>(optional scope): <description>"
+  echo "   Types: feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert"
+  echo "   Received: $MSG"
+  exit 1
+fi
+exit 0

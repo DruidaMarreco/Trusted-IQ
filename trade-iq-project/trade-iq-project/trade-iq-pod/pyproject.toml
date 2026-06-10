@@ -1,0 +1,81 @@
+[project]
+name = "trade-iq-pod"
+version = "0.1.0"
+description = "LangChain orchestrator agent with subagents and FastAPI exposure"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    # LangChain core
+    "langchain>=0.3",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.2",
+    "langchain-anthropic>=0.3",
+    "langchain-google-genai>=2.0",
+    # FastAPI + server
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    # Pydantic (shared models)
+    "pydantic>=2.10",
+    "pydantic-settings>=2.6",
+    # HTTP client (tool calls)
+    "httpx>=0.28",
+    "structlog>=25.5.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff",
+    "mypy",
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+    "pytest-asyncio",
+    "pip-audit",
+    "bandit",
+    "deptry",
+    # type stubs
+    "types-requests",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/app"]
+
+[tool.black]
+line-length = 120
+target-version = ["py313"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: marks tests that require external services",
+    "slow: marks tests that take a long time to run",
+]
+addopts = "--strict-markers -v"
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

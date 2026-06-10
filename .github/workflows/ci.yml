@@ -1,0 +1,150 @@
+name: CI/CD
+
+# The Python project (trade-iq-pod) lives at this nested path inside the repo.
+# All tool steps run from there via each job's `working-directory` default.
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Linting: black (format check) + ruff (lint). No project deps needed, so we
+  # run both as ephemeral tools via `uvx` for speed.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint (black, ruff)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: trade-iq-project/trade-iq-project/trade-iq-pod
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: trade-iq-project/trade-iq-project/trade-iq-pod/uv.lock
+      - name: black --check
+        run: uvx black --check --diff .
+      - name: ruff check
+        run: uvx ruff check --output-format=github .
+
+  # ---------------------------------------------------------------------------
+  # Type checking with ty (Astral's type checker). Needs project deps installed
+  # so imports resolve, hence `uv sync` first.
+  # ---------------------------------------------------------------------------
+  type-check:
+    name: Type check (ty)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: trade-iq-project/trade-iq-project/trade-iq-pod
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: trade-iq-project/trade-iq-project/trade-iq-pod/uv.lock
+      - name: Install dependencies
+        run: uv sync --group dev
+      - name: ty check
+        run: uvx ty check
+
+  # ---------------------------------------------------------------------------
+  # Unit tests + coverage (coverage gate is fail_under=80 in pyproject.toml).
+  # Integration tests are excluded here (they need external services / secrets).
+  # ---------------------------------------------------------------------------
+  test:
+    name: Tests (pytest + coverage)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: trade-iq-project/trade-iq-project/trade-iq-pod
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: trade-iq-project/trade-iq-project/trade-iq-pod/uv.lock
+      - name: Install dependencies
+        run: uv sync --group dev
+      - name: pytest (unit) + coverage
+        run: uv run pytest tests/unit --cov --cov-report=term-missing --cov-report=xml
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: trade-iq-project/trade-iq-project/trade-iq-pod/coverage.xml
+          if-no-files-found: ignore
+
+  # ===========================================================================
+  # METRICS / MODEL BENCHMARK  --  DISABLED FOR NOW
+  # ---------------------------------------------------------------------------
+  # Runs scripts/benchmark_models.py (LLM quality metrics). Disabled until the
+  # planned mass quality-testing pass. To enable:
+  #   1. Remove `if: false` below.
+  #   2. Add the LLM API key(s) as repository secrets and uncomment the `env:`.
+  # ===========================================================================
+  metrics:
+    name: Metrics / model benchmark (disabled)
+    if: false
+    needs: [lint, type-check, test]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: trade-iq-project/trade-iq-project/trade-iq-pod
+    # env:
+    #   AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+    #   AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+    #   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    #   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: trade-iq-project/trade-iq-project/trade-iq-pod/uv.lock
+      - name: Install dependencies
+        run: uv sync --group dev
+      - name: Run model benchmark
+        run: uv run python scripts/benchmark_models.py --runs 3 --output results/benchmark.md
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark
+          path: trade-iq-project/trade-iq-project/trade-iq-pod/results/benchmark.md
+          if-no-files-found: ignore
+
+  # ===========================================================================
+  # DEPLOY  --  DISABLED FOR NOW
+  # ---------------------------------------------------------------------------
+  # Placeholder deployment stage. Runs only after lint/type/test pass, and only
+  # on pushes to main. To enable: remove `if: false`, set the `environment`, and
+  # replace the placeholder step with the real deploy commands/secrets.
+  # ===========================================================================
+  deploy:
+    name: Deploy (disabled)
+    if: false
+    needs: [lint, type-check, test]
+    runs-on: ubuntu-latest
+    # environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder
+        run: echo "Deployment is not configured yet."
