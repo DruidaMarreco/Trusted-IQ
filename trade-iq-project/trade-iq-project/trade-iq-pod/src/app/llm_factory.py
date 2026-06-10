@@ -42,6 +42,13 @@ def build_llm(
     resolved_model = model or cfg.llm_model
     resolved_provider = provider or cfg.llm_provider
 
+    # Claude Code backend: route through the local Claude Code install so calls
+    # use the subscription quota instead of a metered API key.
+    if resolved_provider == "claude_code":
+        from app.claude_code_llm import ChatClaudeCode
+
+        return ChatClaudeCode(model=resolved_model)
+
     # Proxy mode: one OpenAI-compatible endpoint for all models.
     if cfg.llm_proxy_base_url:
         proxy_kwargs: dict[str, Any] = {

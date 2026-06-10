@@ -48,6 +48,21 @@ make audit         # pip-audit dependency scan
 make benchmark     # LLM benchmark (set RUNS=N)
 ```
 
+### Model benchmark
+
+`make benchmark` compares models on the ground-truth dataset (reasoning +
+intent routing) and writes `results/benchmark.md`. By default it runs
+`--backend claude_code`: the Claude model family (Opus / Sonnet / Haiku) is
+called **through Claude Code, billed to your subscription quota** rather than a
+metered API key.
+
+- **Local:** just be logged in to the `claude` CLI — auth is automatic.
+- **CI / headless:** set `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`)
+  and leave `ANTHROPIC_API_KEY` unset (it would override the subscription).
+- To benchmark the metered multi-provider set instead, run
+  `uv run python scripts/benchmark_models.py --backend providers` with the
+  relevant provider API keys set.
+
 ## Documentation
 
 - [Contributing](CONTRIBUTING.md)

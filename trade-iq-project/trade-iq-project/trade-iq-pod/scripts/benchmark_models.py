@@ -71,6 +71,15 @@ MODELS: list[ModelSpec] = [
     ModelSpec("google_genai", "gemini-3-flash", "Gemini 3 Flash", 0.00015, 0.0006),
 ]
 
+# Models compared via Claude Code (subscription quota, no metered API key).
+# Prices are the published Claude API rates, shown for cost-comparison context
+# even though usage is billed against the Claude Code subscription.
+CLAUDE_CODE_MODELS: list[ModelSpec] = [
+    ModelSpec("claude_code", "opus", "Claude Opus (Code)", 0.005, 0.025),
+    ModelSpec("claude_code", "sonnet", "Claude Sonnet (Code)", 0.003, 0.015),
+    ModelSpec("claude_code", "haiku", "Claude Haiku (Code)", 0.001, 0.005),
+]
+
 # ---------------------------------------------------------------------------
 # Benchmark tasks
 # ---------------------------------------------------------------------------
@@ -575,18 +584,25 @@ def _render_markdown(
 # ---------------------------------------------------------------------------
 
 
-async def run_benchmark(runs: int, output_path: Path) -> None:
+async def run_benchmark(runs: int, output_path: Path, backend: str = "claude_code") -> None:
     from app.llm_factory import build_llm
 
     intent_dataset = _load_intent_dataset()
     print(f"Loaded {len(intent_dataset)} routing queries from {INTENT_DATASET_PATH.name}")
 
-    # Judge: cheap model for reasoning evaluation
-    judge_llm = build_llm(model="gpt-4o-mini", provider="openai")
+    if backend == "claude_code":
+        models = CLAUDE_CODE_MODELS
+        # Judge via Claude Code too (cheapest model) so no metered API key is needed.
+        judge_llm = build_llm(model="haiku", provider="claude_code")
+        print("Backend: Claude Code (subscription quota). Native tool-calling tasks are skipped.")
+    else:
+        models = MODELS
+        # Judge: cheap metered model for reasoning evaluation.
+        judge_llm = build_llm(model="gpt-4o-mini", provider="openai")
 
     summaries: list[ModelSummary] = []
 
-    for spec in MODELS:
+    for spec in models:
         print(f"\n▶ {spec.display_name}")
         summary = ModelSummary(spec=spec)
         summary.__dict__["_runs"] = []
@@ -611,18 +627,20 @@ async def run_benchmark(runs: int, output_path: Path) -> None:
                 except Exception as e:
                     print(f"  R{i+1} run{run_i+1}: ERROR {e}")
 
-            # Tool calling tasks
-            for i, task in enumerate(TOOL_TASKS):
-                try:
-                    r = await _run_tool_task(llm, spec, task, i)
-                    summary.tool_scores.append(r.score or 0)
-                    summary.latencies.append(r.latency_s)
-                    summary.total_cost_usd += r.cost_usd
-                    summary.__dict__["_runs"].append(r)
-                    acc = (r.score or 0) * 100
-                    print(f"  T{i+1} run{run_i+1}: acc={acc:.0f}% lat={r.latency_s:.2f}s cost=${r.cost_usd:.5f}")
-                except Exception as e:
-                    print(f"  T{i+1} run{run_i+1}: ERROR {e}")
+            # Tool calling tasks — native tool_calls aren't exposed via Claude Code
+            # (the Agent SDK is agentic, not single-shot), so skip them there.
+            if backend != "claude_code":
+                for i, task in enumerate(TOOL_TASKS):
+                    try:
+                        r = await _run_tool_task(llm, spec, task, i)
+                        summary.tool_scores.append(r.score or 0)
+                        summary.latencies.append(r.latency_s)
+                        summary.total_cost_usd += r.cost_usd
+                        summary.__dict__["_runs"].append(r)
+                        acc = (r.score or 0) * 100
+                        print(f"  T{i+1} run{run_i+1}: acc={acc:.0f}% lat={r.latency_s:.2f}s cost=${r.cost_usd:.5f}")
+                    except Exception as e:
+                        print(f"  T{i+1} run{run_i+1}: ERROR {e}")
 
             # Intent routing — run all dataset queries (routing is deterministic,
             # so single run is sufficient but we respect --runs for consistency)
@@ -674,8 +692,15 @@ def main() -> None:
         default=Path("results/benchmark.md"),
         help="Output markdown file (default: results/benchmark.md)",
     )
+    parser.add_argument(
+        "--backend",
+        choices=["claude_code", "providers"],
+        default="claude_code",
+        help="claude_code = run via Claude Code subscription quota (default); "
+        "providers = use native provider API keys (OpenAI/Anthropic/Google)",
+    )
     args = parser.parse_args()
-    asyncio.run(run_benchmark(args.runs, args.output))
+    asyncio.run(run_benchmark(args.runs, args.output, args.backend))
 
 
 if __name__ == "__main__":

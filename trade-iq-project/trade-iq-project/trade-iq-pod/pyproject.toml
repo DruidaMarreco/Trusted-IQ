@@ -27,6 +27,8 @@ dev = [
     "black",
     "ruff",
     "ty",
+    # Claude Code backend for the benchmark (uses subscription quota, not a key).
+    "claude-agent-sdk",
     "pre-commit",
     "pytest",
     "pytest-cov",
