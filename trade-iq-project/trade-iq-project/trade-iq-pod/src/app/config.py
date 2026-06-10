@@ -21,6 +21,16 @@ class Settings(BaseSettings):
     llm_provider: str = "azure_openai"  # azure_openai | openai | anthropic | ollama
     llm_model: str = "gpt-4o"
 
+    # --- Model proxy (optional, OpenAI-compatible gateway / LiteLLM) ---
+    # When llm_proxy_base_url is set, ALL models are routed through this single
+    # endpoint via the OpenAI-compatible API, overriding the per-provider config
+    # below. This is what the metrics benchmark uses to compare models (GPT,
+    # Claude, Gemini, ...) behind one gateway and pick the best one.
+    llm_proxy_base_url: str = Field(
+        default="", description="OpenAI-compatible proxy base URL, e.g. https://gateway.internal/v1"
+    )
+    llm_proxy_api_key: SecretStr = SecretStr("")
+
     # --- Azure OpenAI ---
     azure_openai_api_key: SecretStr = SecretStr("")
     azure_openai_endpoint: str = ""  # https://<resource>.openai.azure.com/
