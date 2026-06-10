@@ -22,7 +22,7 @@ Runs PROMPT-001 over the ground-truth dataset (`src/tests/data/intent_dataset.js
 the label. Reported as accuracy.
 
 ### 2. Grounded response generation
-For a set of grounded cases (query → tool output via `tpo_tools`), runs PROMPT-002
+For a set of grounded cases (query → deterministic mock tool output via `app.tools`), runs PROMPT-002
 to generate an answer, then scores it on:
 
 | Dimension | How |
