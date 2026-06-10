@@ -30,10 +30,21 @@ endpoint** with example requests/responses, using FastAPI's `TestClient`.
 make integration   # uv run python src/integration_testing/test.py
 ```
 
-- Exercises `/livez`, `/readyz` (no LLM) and `/agent/invoke` (calls the
-  configured LLM backend — defaults to Claude Code).
+- Exercises `/livez`, `/readyz` (no LLM) and `/agent/invoke` for every intent
+  (calls the configured LLM backend — defaults to Claude Code).
 - Intended for manual/demo verification, not as a CI gate. The `/agent/invoke`
   example needs a working LLM backend / auth; it fails gracefully otherwise.
+- Tools default to the deterministic mock. To test the **live** CDT/ERDC HTTP
+  path locally, run the contract stub and point the app at it:
+
+  ```bash
+  uv run uvicorn integration_testing.tool_stubs:stub_app --port 8077   # terminal 1
+  CDT_BASE_URL=http://127.0.0.1:8077 ERDC_BASE_URL=http://127.0.0.1:8077 \
+      uv run python src/integration_testing/test.py                    # terminal 2
+  ```
+
+  `tool_stubs.py` implements the `/query` and `/optimise` contracts with
+  distinctive figures, so a live call is obvious in the grounded answer.
 
 ## 3. Metrics testing — `src/metrics_testing/`
 
