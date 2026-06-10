@@ -1,0 +1,69 @@
+# =============================================================================
+# CD WORKFLOW  --  DISABLED (entirely commented out; never triggers)
+# =============================================================================
+# Continuous Deployment for trade-iq-pod (FastAPI app — app.main:app).
+#
+# To ENABLE this workflow:
+#   1. Remove the leading "# " from every line below the banner.
+#   2. Pick a trigger (version-tag push / GitHub release / manual dispatch).
+#   3. Add a Dockerfile to trade-iq-pod and the registry + deploy credentials as
+#      repository/environment secrets.
+#   4. Configure the `environment:` (protection rules / required reviewers) and
+#      replace the placeholder build/deploy steps with the real ones for your
+#      target (e.g. GHCR + Kubernetes, Azure Web App, Fly.io, ECS, ...).
+# =============================================================================
+#
+# name: CD
+#
+# on:
+#   push:
+#     tags: ["v*"]              # deploy on version tags, e.g. v1.2.3
+#   # release:
+#   #   types: [published]
+#   workflow_dispatch:
+#     inputs:
+#       environment:
+#         description: "Target environment"
+#         required: true
+#         default: "staging"
+#
+# permissions:
+#   contents: read
+#   packages: write             # needed only if pushing images to GHCR
+#
+# concurrency:
+#   group: cd-${{ github.ref }}
+#   cancel-in-progress: false   # never cancel an in-flight deploy
+#
+# jobs:
+#   build:
+#     name: Build image
+#     runs-on: ubuntu-latest
+#     defaults:
+#       run:
+#         working-directory: trade-iq-project/trade-iq-project/trade-iq-pod
+#     steps:
+#       - uses: actions/checkout@v4
+#       - name: Set up uv
+#         uses: astral-sh/setup-uv@v5
+#         with:
+#           enable-cache: true
+#           cache-dependency-glob: trade-iq-project/trade-iq-project/trade-iq-pod/uv.lock
+#       - name: Install (frozen, runtime only)
+#         run: uv sync --frozen --no-dev
+#       # TODO: build & push a container image (e.g. docker/build-push-action).
+#       #       Requires a Dockerfile in trade-iq-pod and registry credentials.
+#       - name: Placeholder build
+#         run: echo "TODO: docker build & push the trade-iq-pod image"
+#
+#   deploy:
+#     name: Deploy
+#     needs: [build]
+#     runs-on: ubuntu-latest
+#     environment: ${{ github.event.inputs.environment || 'production' }}
+#     steps:
+#       - uses: actions/checkout@v4
+#       # TODO: replace with the real deployment using credentials from
+#       #       repository/environment secrets (kubectl / az webapp / flyctl / ...).
+#       - name: Placeholder deploy
+#         run: echo "TODO: deploy trade-iq-pod to ${{ github.event.inputs.environment || 'production' }}"

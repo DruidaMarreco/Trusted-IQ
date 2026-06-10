@@ -1,7 +1,11 @@
-name: CI/CD
+name: CI
 
-# The Python project (trade-iq-pod) lives at this nested path inside the repo.
-# All tool steps run from there via each job's `working-directory` default.
+# Continuous Integration — lint, type-check, and test the trade-iq-pod project
+# on every push / PR. Metrics (model benchmarking) and CD (deployment) live in
+# their own workflows: metrics.yml and cd.yml.
+#
+# The Python project lives at this nested path inside the repo; every job sets
+# it as the working-directory default.
 
 on:
   push:
@@ -14,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -69,7 +73,10 @@ jobs:
   # pyproject sets fail_under=80 (the target for local `make test`), but CI
   # passes --cov-fail-under=0 until the planned mass quality-testing pass lands
   # more tests. Raise/remove the override then to enforce 80% in CI.
-  # Integration tests are excluded here (they need external services / secrets).
+  #
+  # Integration tests (tests/integration, -m integration) are intentionally NOT
+  # run here: they need external services / API-key secrets. Wire them into a
+  # dedicated job (guarded on secrets) once they exist.
   # ---------------------------------------------------------------------------
   test:
     name: Tests (pytest + coverage)
@@ -95,61 +102,3 @@ jobs:
           name: coverage-xml
           path: trade-iq-project/trade-iq-project/trade-iq-pod/coverage.xml
           if-no-files-found: ignore
-
-  # ===========================================================================
-  # METRICS / MODEL BENCHMARK  --  DISABLED FOR NOW
-  # ---------------------------------------------------------------------------
-  # Runs scripts/benchmark_models.py (LLM quality metrics). Disabled until the
-  # planned mass quality-testing pass. To enable:
-  #   1. Remove `if: false` below.
-  #   2. Add the LLM API key(s) as repository secrets and uncomment the `env:`.
-  # ===========================================================================
-  metrics:
-    name: Metrics / model benchmark (disabled)
-    if: false
-    needs: [lint, type-check, test]
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: trade-iq-project/trade-iq-project/trade-iq-pod
-    # env:
-    #   AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-    #   AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-    #   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    #   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: trade-iq-project/trade-iq-project/trade-iq-pod/uv.lock
-      - name: Install dependencies
-        run: uv sync --group dev
-      - name: Run model benchmark
-        run: uv run python scripts/benchmark_models.py --runs 3 --output results/benchmark.md
-      - name: Upload benchmark results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark
-          path: trade-iq-project/trade-iq-project/trade-iq-pod/results/benchmark.md
-          if-no-files-found: ignore
-
-  # ===========================================================================
-  # DEPLOY  --  DISABLED FOR NOW
-  # ---------------------------------------------------------------------------
-  # Placeholder deployment stage. Runs only after lint/type/test pass, and only
-  # on pushes to main. To enable: remove `if: false`, set the `environment`, and
-  # replace the placeholder step with the real deploy commands/secrets.
-  # ===========================================================================
-  deploy:
-    name: Deploy (disabled)
-    if: false
-    needs: [lint, type-check, test]
-    runs-on: ubuntu-latest
-    # environment: production
-    steps:
-      - uses: actions/checkout@v4
-      - name: Placeholder
-        run: echo "Deployment is not configured yet."
