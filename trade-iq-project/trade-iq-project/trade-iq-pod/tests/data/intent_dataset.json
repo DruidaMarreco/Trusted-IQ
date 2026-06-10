@@ -1,0 +1,33 @@
+[
+  {"query": "What were total sales for Q1?", "expected": "DATA_QUERY"},
+  {"query": "Show me the recommended promotions for Easter.", "expected": "DATA_QUERY"},
+  {"query": "What is the expected uplift for the current plan?", "expected": "DATA_QUERY"},
+  {"query": "List all promotions in the optimized plan.", "expected": "DATA_QUERY"},
+  {"query": "How much revenue did campaign X generate last year?", "expected": "DATA_QUERY"},
+  {"query": "Show baseline vs optimized sales values.", "expected": "DATA_QUERY"},
+  {"query": "What discounts are applied in the current scenario?", "expected": "DATA_QUERY"},
+  {"query": "Give me volume uplift numbers for each promotion.", "expected": "DATA_QUERY"},
+
+  {"query": "Why is this promotion recommended?", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "Explain why the optimizer selected these products.", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "Compare the optimized plan vs the baseline plan.", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "What is the difference between scenario A and scenario B?", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "Which promotions drive the highest ROI and why?", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "Explain the uplift drivers behind this recommendation.", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "Why did sales increase in the optimized scenario?", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "How does the optimized plan improve performance over the current plan?", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "Show me the delta between the baseline and optimized scenarios and explain it.", "expected": "EXPLAIN_SCENARIOS"},
+
+  {"query": "What is the difference in sales between baseline and optimized?", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "Why are these promotions performing better?", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "Show me sales and explain the differences.", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "What are the top promotions and why?", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "How much did revenue increase?", "expected": "DATA_QUERY"},
+  {"query": "Explain revenue increase.", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "Show uplift values.", "expected": "DATA_QUERY"},
+  {"query": "Explain uplift values.", "expected": "EXPLAIN_SCENARIOS"},
+
+  {"query": "Show performance.", "expected": "DATA_QUERY"},
+  {"query": "Tell me about this plan.", "expected": "EXPLAIN_SCENARIOS"},
+  {"query": "What happened in this scenario?", "expected": "EXPLAIN_SCENARIOS"}
+]

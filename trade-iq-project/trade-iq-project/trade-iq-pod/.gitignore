@@ -18,7 +18,10 @@ htmlcov/
 coverage.xml
 *.log
 logs/
+# Ignore runtime data dirs, but keep ground-truth test/benchmark datasets.
 data/
+!tests/data/
+!tests/data/**
 *.sqlite3
 .DS_Store
 results/
