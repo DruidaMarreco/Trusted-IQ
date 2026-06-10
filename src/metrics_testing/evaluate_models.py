@@ -178,8 +178,8 @@ class ModelScore:
 
     @property
     def value_index(self) -> float:
-        """Quality per US cent — composite / cost. Higher = better value."""
-        return round(self.composite / max(self.cost_usd, 1e-6) / 100, 1)
+        """Composite quality per US dollar of estimated cost. Higher = better value."""
+        return round(self.composite / max(self.cost_usd, 1e-6), 1)
 
     def record_call(self, latency_ms: float, input_tokens: int, output_tokens: int) -> None:
         """Record usage metrics for one candidate-model call."""
@@ -437,7 +437,7 @@ def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str) -> str
 <th>Grounded /5</th><th>Relevance /5</th><th>Format /5</th><th>Figure overlap</th>
 <th class="l">Answer</th><th class="l">Tool output</th></tr></thead>
 <tbody>{response_rows}</tbody></table>
-<p><small>Value = composite quality per US cent of estimated cost. Groundedness = answer uses only tool
+<p><small>Value = composite quality per US dollar of estimated cost. Groundedness = answer uses only tool
 output (LLM judge + figure-overlap check). Claude Code usage is subscription-quota billed.</small></p>
 </body></html>
 """
