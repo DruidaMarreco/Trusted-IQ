@@ -41,14 +41,14 @@
 #     runs-on: ubuntu-latest
 #     defaults:
 #       run:
-#         working-directory: trade-iq-project/trade-iq-project/trade-iq-pod
+#         working-directory: .
 #     steps:
 #       - uses: actions/checkout@v4
 #       - name: Set up uv
 #         uses: astral-sh/setup-uv@v5
 #         with:
 #           enable-cache: true
-#           cache-dependency-glob: trade-iq-project/trade-iq-project/trade-iq-pod/uv.lock
+#           cache-dependency-glob: uv.lock
 #       - name: Install (frozen, runtime only)
 #         run: uv sync --frozen --no-dev
 #       # TODO: build & push a container image (e.g. docker/build-push-action).

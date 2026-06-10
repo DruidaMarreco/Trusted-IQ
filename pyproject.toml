@@ -60,7 +60,10 @@ target-version = "py313"
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# Unit tests live under src/tests/unit_testing; src is on the path so `app`
+# imports resolve without setting PYTHONPATH manually.
+pythonpath = ["src"]
+testpaths = ["src/tests/unit_testing"]
 markers = [
     "integration: marks tests that require external services",
     "slow: marks tests that take a long time to run",
@@ -69,8 +72,8 @@ addopts = "--strict-markers -v"
 asyncio_mode = "auto"
 
 [tool.coverage.run]
-source = ["src"]
-omit = ["tests/*"]
+source = ["src/app"]
+omit = ["src/tests/*", "src/integration_testing/*", "src/metrics_testing/*"]
 
 [tool.coverage.report]
 fail_under = 80

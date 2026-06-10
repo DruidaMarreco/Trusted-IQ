@@ -1,7 +1,7 @@
 # =============================================================================
 # METRICS WORKFLOW  --  DISABLED (entirely commented out; never triggers)
 # =============================================================================
-# Mass model-quality testing. Runs scripts/evaluate_models.py, which executes
+# Mass model-quality testing. Runs src/metrics_testing/evaluate_models.py, which executes
 # the TradeIQ GenAI Sales Assistant flow (Intent Classifier -> mock TextToSQL /
 # Optimizer tool -> grounded Response Generator) for each model and COMPARES
 # them on:
@@ -24,7 +24,7 @@
 #   4. The GT dataset (tests/data/intent_dataset.json) is already committed.
 #      Expand it for larger "mass" runs.
 #   5. To compare a different model set, edit CLAUDE_CODE_MODELS (or
-#      PROVIDER_MODELS) in scripts/evaluate_models.py.
+#      PROVIDER_MODELS) in src/metrics_testing/evaluate_models.py.
 # =============================================================================
 #
 # name: Metrics
@@ -54,7 +54,7 @@
 #     runs-on: ubuntu-latest
 #     defaults:
 #       run:
-#         working-directory: trade-iq-project/trade-iq-project/trade-iq-pod
+#         working-directory: .
 #     env:
 #       # Subscription-quota auth for the Claude Agent SDK. Do NOT set
 #       # ANTHROPIC_API_KEY here, or it takes precedence over the subscription.
@@ -72,15 +72,15 @@
 #         uses: astral-sh/setup-uv@v5
 #         with:
 #           enable-cache: true
-#           cache-dependency-glob: trade-iq-project/trade-iq-project/trade-iq-pod/uv.lock
+#           cache-dependency-glob: uv.lock
 #       - name: Install dependencies
 #         run: uv sync --group dev
 #       - name: Run evaluation (Claude Code, intent + grounded responses)
-#         run: uv run python scripts/evaluate_models.py --backend claude_code --intent-sample "${{ github.event.inputs.intent_sample || '24' }}" --output results/model_eval.md
+#         run: uv run python src/metrics_testing/evaluate_models.py --backend claude_code --intent-sample "${{ github.event.inputs.intent_sample || '24' }}" --output results/model_eval.md
 #       - name: Upload evaluation report
 #         if: always()
 #         uses: actions/upload-artifact@v4
 #         with:
 #           name: model-eval
-#           path: trade-iq-project/trade-iq-project/trade-iq-pod/results/model_eval.md
+#           path: results/model_eval.md
 #           if-no-files-found: warn

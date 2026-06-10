@@ -78,6 +78,34 @@ Score each dimension 1-5 (5 = best) and return ONLY a JSON object:
 ACCOUNT_SCOPE = "All UK & EU grocery accounts"
 PLANNING_PERIOD = "FY2025"
 
+_HTML_TEMPLATE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>TradeIQ TPO — Model Evaluation</title>
+<style>
+body {{ font-family: system-ui, "Segoe UI", Arial, sans-serif; margin: 2rem; color: #1a1a1a; }}
+h1 {{ font-size: 1.4rem; margin-bottom: .25rem; }}
+.meta {{ color: #666; margin-bottom: 1rem; }}
+table {{ border-collapse: collapse; width: 100%; max-width: 920px; }}
+th, td {{ border: 1px solid #ddd; padding: .5rem .75rem; text-align: right; }}
+th:first-child, td:first-child {{ text-align: left; }}
+thead {{ background: #0b5fff; color: #fff; }}
+tr.best {{ background: #e8f5e9; }}
+.rec {{ margin-top: 1rem; padding: .75rem; background: #e8f5e9; border-left: 4px solid #2e7d32; }}
+small {{ color: #888; }}
+</style></head><body>
+<h1>TradeIQ TPO — Model Evaluation</h1>
+<div class="meta">Intent cases: {intent_n} &middot; Grounded response cases: {n_cases}</div>
+<table><thead><tr>
+<th>Model</th><th>Intent acc.</th><th>Groundedness /5</th><th>Figure overlap</th>
+<th>Relevance /5</th><th>Format /5</th><th>Composite</th></tr></thead>
+<tbody>
+{rows}
+</tbody></table>
+<div class="rec"><strong>Recommended:</strong> {best} (composite {composite:.3f})</div>
+<p><small>Groundedness = answer uses only tool output (LLM judge + figure-overlap check).</small></p>
+</body></html>
+"""
+
 
 @dataclass
 class ModelScore:
@@ -204,6 +232,32 @@ def _render_report(scores: list[ModelScore], intent_n: int) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _render_html(scores: list[ModelScore], intent_n: int) -> str:
+    ranked = sorted(scores, key=lambda x: -x.composite)
+    if not ranked:
+        return "<!doctype html><html><body><p>No results.</p></body></html>\n"
+    best = ranked[0]
+    row_list: list[str] = []
+    for s in ranked:
+        cls = "best" if s.name == best.name else ""
+        row_list.append(
+            f'<tr class="{cls}"><td>{s.name}</td>'
+            f"<td>{s.intent_accuracy * 100:.1f}%</td>"
+            f"<td>{s._avg(s.groundedness):.1f}</td>"
+            f"<td>{s._avg(s.figure_overlap) * 100:.0f}%</td>"
+            f"<td>{s._avg(s.relevance):.1f}</td>"
+            f"<td>{s._avg(s.fmt):.1f}</td>"
+            f"<td><strong>{s.composite:.3f}</strong></td></tr>"
+        )
+    return _HTML_TEMPLATE.format(
+        intent_n=intent_n,
+        n_cases=len(GROUNDED_CASES),
+        rows="\n".join(row_list),
+        best=best.name,
+        composite=best.composite,
+    )
+
+
 async def run_evaluation(intent_sample: int, output_path: Path, backend: str) -> None:
     from app.llm_factory import build_llm
 
@@ -226,7 +280,9 @@ async def run_evaluation(intent_sample: int, output_path: Path, backend: str) ->
     report = _render_report(scores, len(intent_cases))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(report, encoding="utf-8")
-    print(f"\n✅ Report saved → {output_path}\n")
+    html_path = output_path.with_suffix(".html")
+    html_path.write_text(_render_html(scores, len(intent_cases)), encoding="utf-8")
+    print(f"\n✅ Reports saved → {output_path} and {html_path}\n")
     print(report)
 
 

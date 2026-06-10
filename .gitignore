@@ -1,5 +1,34 @@
-# Claude Code internal/session data accidentally nested under .claude/.claude/.
-# Contains machine-local logs, telemetry, plugin caches, and secrets.
-# Keep only the curated skills; ignore everything else.
-.claude/.claude/*
-!.claude/.claude/skills/
+# --- Python ---
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+wheels/
+.venv/
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+*.log
+logs/
+*.sqlite3
+.DS_Store
+.audit-reqs.txt
+
+# Runtime/output data. Ground-truth datasets under src/tests/data are kept.
+data/
+!src/tests/data/
+!src/tests/data/**
+results/
+
+# --- Claude Code workspace data (machine-local); keep only curated skills ---
+.claude/*
+!.claude/skills/

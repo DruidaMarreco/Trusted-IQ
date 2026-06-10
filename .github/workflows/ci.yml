@@ -31,20 +31,20 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: trade-iq-project/trade-iq-project/trade-iq-pod
+        working-directory: .
     steps:
       - uses: actions/checkout@v4
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: trade-iq-project/trade-iq-project/trade-iq-pod/uv.lock
+          cache-dependency-glob: uv.lock
       - name: Install dependencies
         run: uv sync --group dev
       - name: black --check
-        run: uv run black --check --diff .
+        run: uv run black --check --diff src
       - name: ruff check
-        run: uv run ruff check --output-format=github .
+        run: uv run ruff check --output-format=github src
 
   # ---------------------------------------------------------------------------
   # Type checking with ty (Astral's type checker). Needs project deps installed
@@ -55,18 +55,18 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: trade-iq-project/trade-iq-project/trade-iq-pod
+        working-directory: .
     steps:
       - uses: actions/checkout@v4
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: trade-iq-project/trade-iq-project/trade-iq-pod/uv.lock
+          cache-dependency-glob: uv.lock
       - name: Install dependencies
         run: uv sync --group dev
       - name: ty check
-        run: uv run ty check
+        run: uv run ty check src
 
   # ---------------------------------------------------------------------------
   # Unit tests + coverage. Coverage is REPORTED but not gated yet:
@@ -83,22 +83,22 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: trade-iq-project/trade-iq-project/trade-iq-pod
+        working-directory: .
     steps:
       - uses: actions/checkout@v4
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: trade-iq-project/trade-iq-project/trade-iq-pod/uv.lock
+          cache-dependency-glob: uv.lock
       - name: Install dependencies
         run: uv sync --group dev
       - name: pytest (unit) + coverage
-        run: uv run pytest tests/unit --cov --cov-report=term-missing --cov-report=xml --cov-fail-under=0
+        run: uv run pytest --cov --cov-report=term-missing --cov-report=xml --cov-fail-under=0
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-xml
-          path: trade-iq-project/trade-iq-project/trade-iq-pod/coverage.xml
+          path: coverage.xml
           if-no-files-found: ignore
