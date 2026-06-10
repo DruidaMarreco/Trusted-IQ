@@ -172,6 +172,22 @@ Model response:
 
 Return ONLY a JSON object: {{"score": <0-10>, "reason": "<one sentence>"}}"""
 
+# Tool-selection prompt — uniform across backends. Asks the model (plain text)
+# which single tool it would call, returned as JSON, so tool-calling can be
+# compared even on backends without native function-calling (e.g. Claude Code).
+TOOL_SELECTION_PROMPT = """You can call exactly one tool to answer the user query.
+
+Available tool (JSON schema):
+{tools}
+
+Respond with ONLY a JSON object for the single tool call you would make:
+{{"name": "<tool_name>", "args": {{...}}}}
+Include only arguments that the query actually specifies. If no tool applies,
+respond {{"name": null, "args": {{}}}}.
+
+User query: {query}
+JSON:"""
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -307,26 +323,25 @@ async def _run_tool_task(
     task: dict[str, str | dict[str, str]],
     idx: int,
 ) -> RunResult:
-    from langchain_core.utils.function_calling import convert_to_openai_tool
-
-    tools = [convert_to_openai_tool(TOOL_SCHEMA)]
-    llm_with_tools = llm.bind_tools(tools)  # type: ignore[attr-defined]
+    """Uniform tool-selection eval: ask the model (plain text) which tool it
+    would call, as JSON, and grade the choice. Works on every backend — no
+    native function-calling required."""
+    prompt = TOOL_SELECTION_PROMPT.format(
+        tools=json.dumps(TOOL_SCHEMA, indent=2),
+        query=str(task["query"]),
+    )
 
     start = time.perf_counter()
-    response: AIMessage = await llm_with_tools.ainvoke([HumanMessage(content=str(task["query"]))])  # type: ignore[assignment]
+    response: AIMessage = await llm.ainvoke([HumanMessage(content=prompt)])  # type: ignore[assignment]
     latency = time.perf_counter() - start
 
     raw = str(response.content)
     usage = getattr(response, "usage_metadata", None)
-    input_tokens = (
-        usage.get("input_tokens", _estimate_tokens(str(task["query"])))
-        if usage
-        else _estimate_tokens(str(task["query"]))
-    )
+    input_tokens = usage.get("input_tokens", _estimate_tokens(prompt)) if usage else _estimate_tokens(prompt)
     output_tokens = usage.get("output_tokens", _estimate_tokens(raw)) if usage else _estimate_tokens(raw)
     cost = _compute_cost(spec, input_tokens, output_tokens)
 
-    tool_calls = getattr(response, "tool_calls", [])
+    tool_calls = _parse_tool_selection(raw)
     score, reason = _evaluate_tool_call(tool_calls, task)
 
     return RunResult(
@@ -339,8 +354,23 @@ async def _run_tool_task(
         cost_usd=cost,
         score=score,
         score_reason=reason,
-        raw_response=str(tool_calls)[:500],
+        raw_response=raw[:500],
     )
+
+
+def _parse_tool_selection(text: str) -> list[dict[str, object]]:
+    """Parse a JSON tool-selection response into a tool_calls-style list."""
+    try:
+        start = text.index("{")
+        end = text.rindex("}") + 1
+        data = json.loads(text[start:end])
+    except (ValueError, json.JSONDecodeError):
+        return []
+    name = data.get("name")
+    if not name:
+        return []
+    args = data.get("args", {})
+    return [{"name": str(name), "args": args if isinstance(args, dict) else {}}]
 
 
 def _evaluate_tool_call(
@@ -594,7 +624,7 @@ async def run_benchmark(runs: int, output_path: Path, backend: str = "claude_cod
         models = CLAUDE_CODE_MODELS
         # Judge via Claude Code too (cheapest model) so no metered API key is needed.
         judge_llm = build_llm(model="haiku", provider="claude_code")
-        print("Backend: Claude Code (subscription quota). Native tool-calling tasks are skipped.")
+        print("Backend: Claude Code (subscription quota).")
     else:
         models = MODELS
         # Judge: cheap metered model for reasoning evaluation.
@@ -627,20 +657,18 @@ async def run_benchmark(runs: int, output_path: Path, backend: str = "claude_cod
                 except Exception as e:
                     print(f"  R{i+1} run{run_i+1}: ERROR {e}")
 
-            # Tool calling tasks — native tool_calls aren't exposed via Claude Code
-            # (the Agent SDK is agentic, not single-shot), so skip them there.
-            if backend != "claude_code":
-                for i, task in enumerate(TOOL_TASKS):
-                    try:
-                        r = await _run_tool_task(llm, spec, task, i)
-                        summary.tool_scores.append(r.score or 0)
-                        summary.latencies.append(r.latency_s)
-                        summary.total_cost_usd += r.cost_usd
-                        summary.__dict__["_runs"].append(r)
-                        acc = (r.score or 0) * 100
-                        print(f"  T{i+1} run{run_i+1}: acc={acc:.0f}% lat={r.latency_s:.2f}s cost=${r.cost_usd:.5f}")
-                    except Exception as e:
-                        print(f"  T{i+1} run{run_i+1}: ERROR {e}")
+            # Tool-selection tasks — uniform JSON-based eval, works on every backend.
+            for i, task in enumerate(TOOL_TASKS):
+                try:
+                    r = await _run_tool_task(llm, spec, task, i)
+                    summary.tool_scores.append(r.score or 0)
+                    summary.latencies.append(r.latency_s)
+                    summary.total_cost_usd += r.cost_usd
+                    summary.__dict__["_runs"].append(r)
+                    acc = (r.score or 0) * 100
+                    print(f"  T{i+1} run{run_i+1}: acc={acc:.0f}% lat={r.latency_s:.2f}s cost=${r.cost_usd:.5f}")
+                except Exception as e:
+                    print(f"  T{i+1} run{run_i+1}: ERROR {e}")
 
             # Intent routing — run all dataset queries (routing is deterministic,
             # so single run is sufficient but we respect --runs for consistency)
