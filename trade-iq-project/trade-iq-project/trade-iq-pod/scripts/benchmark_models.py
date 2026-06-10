@@ -11,6 +11,7 @@ Usage:
     python -m uv run python scripts/benchmark_models.py
     python -m uv run python scripts/benchmark_models.py --runs 5 --output results/benchmark.md
 """
+
 from __future__ import annotations
 
 import argparse
@@ -21,6 +22,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
@@ -29,12 +31,13 @@ from langchain_core.messages import AIMessage, HumanMessage
 # Model registry
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ModelSpec:
     provider: str
     model: str
     display_name: str
-    cost_input_per_1k: float   # USD per 1k input tokens
+    cost_input_per_1k: float  # USD per 1k input tokens
     cost_output_per_1k: float  # USD per 1k output tokens
 
 
@@ -43,31 +46,29 @@ MODELS: list[ModelSpec] = [
     # OpenAI  (prices: platform.openai.com/docs/pricing)
     # ------------------------------------------------------------------
     # Frontier / best reasoning
-    ModelSpec("openai", "gpt-5",       "GPT-5",       0.015,   0.060),
+    ModelSpec("openai", "gpt-5", "GPT-5", 0.015, 0.060),
     # Best cost/quality balance
-    ModelSpec("openai", "gpt-4o",      "GPT-4o",      0.0025,  0.010),
+    ModelSpec("openai", "gpt-4o", "GPT-4o", 0.0025, 0.010),
     # Cheapest, fast
     ModelSpec("openai", "gpt-4o-mini", "GPT-4o mini", 0.00015, 0.0006),
-
     # ------------------------------------------------------------------
     # Anthropic  (prices: platform.claude.com/docs/about-claude/models)
     # ------------------------------------------------------------------
     # Frontier — equivalent to GPT-5  ($5/$25 per MTok)
-    ModelSpec("anthropic", "claude-opus-4-8",   "Claude Opus 4.8",   0.005,  0.025),
+    ModelSpec("anthropic", "claude-opus-4-8", "Claude Opus 4.8", 0.005, 0.025),
     # Mid-tier — equivalent to GPT-4o  ($3/$15 per MTok)
-    ModelSpec("anthropic", "claude-sonnet-4-6", "Claude Sonnet 4.6", 0.003,  0.015),
+    ModelSpec("anthropic", "claude-sonnet-4-6", "Claude Sonnet 4.6", 0.003, 0.015),
     # Cheap/fast — equivalent to GPT-4o mini  ($1/$5 per MTok)
-    ModelSpec("anthropic", "claude-haiku-4-5",  "Claude Haiku 4.5",  0.001,  0.005),
-
+    ModelSpec("anthropic", "claude-haiku-4-5", "Claude Haiku 4.5", 0.001, 0.005),
     # ------------------------------------------------------------------
     # Google Gemini  (prices: ai.google.dev/gemini-api/docs/pricing)
     # ------------------------------------------------------------------
     # Frontier — equivalent to GPT-5 / Opus 4.8
-    ModelSpec("google_genai", "gemini-3.1-pro",   "Gemini 3.1 Pro",   0.00125, 0.010),
+    ModelSpec("google_genai", "gemini-3.1-pro", "Gemini 3.1 Pro", 0.00125, 0.010),
     # Mid-tier — equivalent to GPT-4o / Sonnet
-    ModelSpec("google_genai", "gemini-3.5-flash",  "Gemini 3.5 Flash", 0.00030, 0.0025),
+    ModelSpec("google_genai", "gemini-3.5-flash", "Gemini 3.5 Flash", 0.00030, 0.0025),
     # Cheap/fast — equivalent to GPT-4o mini / Haiku
-    ModelSpec("google_genai", "gemini-3-flash",    "Gemini 3 Flash",   0.00015, 0.0006),
+    ModelSpec("google_genai", "gemini-3-flash", "Gemini 3 Flash", 0.00015, 0.0006),
 ]
 
 # ---------------------------------------------------------------------------
@@ -77,16 +78,29 @@ MODELS: list[ModelSpec] = [
 # --- Reasoning / decomposition tasks ---
 REASONING_TASKS = [
     {
-        "query": "Analyse the top 3 tech stocks by YTD performance, summarise risks, and suggest a rebalancing strategy.",
-        "rubric": "Does the response decompose into: (1) data retrieval, (2) risk analysis, (3) strategy synthesis? Score 0-10.",
+        "query": (
+            "Analyse the top 3 tech stocks by YTD performance, summarise risks, " "and suggest a rebalancing strategy."
+        ),
+        "rubric": (
+            "Does the response decompose into: (1) data retrieval, (2) risk analysis, "
+            "(3) strategy synthesis? Score 0-10."
+        ),
     },
     {
         "query": "A client has €500k in cash. Compare ETF vs direct equity allocation for a 5-year horizon.",
-        "rubric": "Does the response address: allocation options, time horizon trade-offs, tax implications? Score 0-10.",
+        "rubric": (
+            "Does the response address: allocation options, time horizon trade-offs, " "tax implications? Score 0-10."
+        ),
     },
     {
-        "query": "Explain how rising interest rates affect bond portfolios and what actions an orchestrator should delegate.",
-        "rubric": "Does the response correctly identify sub-tasks to delegate (macro analysis, portfolio impact, hedge options)? Score 0-10.",
+        "query": (
+            "Explain how rising interest rates affect bond portfolios and what actions "
+            "an orchestrator should delegate."
+        ),
+        "rubric": (
+            "Does the response correctly identify sub-tasks to delegate "
+            "(macro analysis, portfolio impact, hedge options)? Score 0-10."
+        ),
     },
 ]
 
@@ -154,6 +168,7 @@ Return ONLY a JSON object: {{"score": <0-10>, "reason": "<one sentence>"}}"""
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class RunResult:
     model: str
@@ -163,7 +178,7 @@ class RunResult:
     input_tokens: int
     output_tokens: int
     cost_usd: float
-    score: float | None = None          # reasoning 0-10 | tool 0-1 | routing 0-1
+    score: float | None = None  # reasoning 0-10 | tool 0-1 | routing 0-1
     score_reason: str = ""
     raw_response: str = ""
 
@@ -206,9 +221,11 @@ class ModelSummary:
 # Core benchmark logic
 # ---------------------------------------------------------------------------
 
+
 def _build_llm(spec: ModelSpec) -> BaseChatModel:
     """Import here to avoid hard dependency on all providers at module load."""
-    from app.llm_factory import build_llm  # noqa: PLC0415
+    from app.llm_factory import build_llm
+
     return build_llm(model=spec.model, provider=spec.provider)
 
 
@@ -224,10 +241,7 @@ def _estimate_tokens(text: str) -> int:
 
 
 def _compute_cost(spec: ModelSpec, input_tokens: int, output_tokens: int) -> float:
-    return (
-        input_tokens / 1000 * spec.cost_input_per_1k
-        + output_tokens / 1000 * spec.cost_output_per_1k
-    )
+    return input_tokens / 1000 * spec.cost_input_per_1k + output_tokens / 1000 * spec.cost_output_per_1k
 
 
 async def _run_reasoning_task(
@@ -243,14 +257,14 @@ async def _run_reasoning_task(
 
     raw = str(response.content)
     usage = getattr(response, "usage_metadata", None)
-    input_tokens = usage.get("input_tokens", _estimate_tokens(task["query"])) if usage else _estimate_tokens(task["query"])
+    input_tokens = (
+        usage.get("input_tokens", _estimate_tokens(task["query"])) if usage else _estimate_tokens(task["query"])
+    )
     output_tokens = usage.get("output_tokens", _estimate_tokens(raw)) if usage else _estimate_tokens(raw)
     cost = _compute_cost(spec, input_tokens, output_tokens)
 
     # LLM-as-judge
-    judge_prompt = JUDGE_PROMPT.format(
-        query=task["query"], rubric=task["rubric"], response=raw
-    )
+    judge_prompt = JUDGE_PROMPT.format(query=task["query"], rubric=task["rubric"], response=raw)
     judge_resp: AIMessage = await judge_llm.ainvoke([HumanMessage(content=judge_prompt)])  # type: ignore[assignment]
     score, reason = _parse_judge(str(judge_resp.content))
 
@@ -284,7 +298,7 @@ async def _run_tool_task(
     task: dict[str, str | dict[str, str]],
     idx: int,
 ) -> RunResult:
-    from langchain_core.utils.function_calling import convert_to_openai_tool  # noqa: PLC0415
+    from langchain_core.utils.function_calling import convert_to_openai_tool
 
     tools = [convert_to_openai_tool(TOOL_SCHEMA)]
     llm_with_tools = llm.bind_tools(tools)  # type: ignore[attr-defined]
@@ -295,7 +309,11 @@ async def _run_tool_task(
 
     raw = str(response.content)
     usage = getattr(response, "usage_metadata", None)
-    input_tokens = usage.get("input_tokens", _estimate_tokens(str(task["query"]))) if usage else _estimate_tokens(str(task["query"]))
+    input_tokens = (
+        usage.get("input_tokens", _estimate_tokens(str(task["query"])))
+        if usage
+        else _estimate_tokens(str(task["query"]))
+    )
     output_tokens = usage.get("output_tokens", _estimate_tokens(raw)) if usage else _estimate_tokens(raw)
     cost = _compute_cost(spec, input_tokens, output_tokens)
 
@@ -325,17 +343,14 @@ def _evaluate_tool_call(
 
     call = tool_calls[0]
     called_tool = call.get("name", "")
-    called_args: dict[str, str] = call.get("args", {})  # type: ignore[assignment]
+    called_args = cast("dict[str, str]", call.get("args", {}))
     expected_tool = str(task["expected_tool"])
-    expected_args: dict[str, str] = task["expected_args"]  # type: ignore[assignment]
+    expected_args = cast("dict[str, str]", task["expected_args"])
 
     if called_tool != expected_tool:
         return 0.0, f"wrong tool: got {called_tool}"
 
-    matches = sum(
-        1 for k, v in expected_args.items()
-        if str(called_args.get(k, "")).upper() == str(v).upper()
-    )
+    matches = sum(1 for k, v in expected_args.items() if str(called_args.get(k, "")).upper() == str(v).upper())
     score = matches / len(expected_args)
     reason = f"{matches}/{len(expected_args)} args correct"
     return score, reason
@@ -384,6 +399,7 @@ async def _run_routing_task(
 # Report generation
 # ---------------------------------------------------------------------------
 
+
 def _render_markdown(
     summaries: list[ModelSummary],
     runs: int,
@@ -402,12 +418,12 @@ def _render_markdown(
         f"**Runs per task:** {runs}  ",
         f"**Reasoning tasks:** {len(REASONING_TASKS)}  ",
         f"**Tool calling tasks:** {len(TOOL_TASKS)}  ",
-        f"**Routing queries:** {n_routing} "
-        + " / ".join(f"{v} {k}" for k, v in sorted(intent_counts.items())),
+        f"**Routing queries:** {n_routing} " + " / ".join(f"{v} {k}" for k, v in sorted(intent_counts.items())),
         "\n---\n",
         "## Summary",
         "",
-        "| Model | Reasoning (0-10) | Tool Accuracy (%) | Routing Accuracy (%) | Avg Latency (s) | p95 Latency (s) | Total Cost (USD) |",
+        "| Model | Reasoning (0-10) | Tool Accuracy (%) | Routing Accuracy (%) "
+        "| Avg Latency (s) | p95 Latency (s) | Total Cost (USD) |",
         "|---|---|---|---|---|---|---|",
     ]
 
@@ -445,7 +461,7 @@ def _render_markdown(
 
     lines += [
         "",
-        "_* Value index = combined quality / (cost per query × 1000). Higher = better value._",
+        "_* Value index = combined quality / (cost per query × 1000). Higher = better value._",  # noqa: RUF001
         "\n---\n",
         "## Intent Routing Results",
         "",
@@ -460,9 +476,11 @@ def _render_markdown(
     for s in sorted(summaries, key=lambda x: -x.routing_accuracy):
         correct = sum(s.routing_scores)
         total = len(s.routing_scores)
-        avg_lat = statistics.mean(
-            r.latency_s for r in s.__dict__.get("_runs", []) if r.task_type == "routing"
-        ) if any(r.task_type == "routing" for r in s.__dict__.get("_runs", [])) else 0.0
+        avg_lat = (
+            statistics.mean(r.latency_s for r in s.__dict__.get("_runs", []) if r.task_type == "routing")
+            if any(r.task_type == "routing" for r in s.__dict__.get("_runs", []))
+            else 0.0
+        )
         lines.append(
             f"| {s.spec.display_name} "
             f"| {correct:.0f} "
@@ -487,9 +505,7 @@ def _render_markdown(
             )
             for s in summaries
         }
-        any_wrong = any(
-            r is not None and r.score == 0.0 for r in row_results.values()
-        )
+        any_wrong = any(r is not None and r.score == 0.0 for r in row_results.values())
         if any_wrong:
             cells = []
             for s in summaries:
@@ -501,11 +517,7 @@ def _render_markdown(
                 else:
                     predicted = r.raw_response.strip().split()[0] if r.raw_response.strip() else "?"
                     cells.append(f"❌ `{predicted}`")
-            lines.append(
-                f"| {item['query'][:60]} "
-                f"| `{item['expected']}` "
-                f"| " + " | ".join(cells) + " |"
-            )
+            lines.append(f"| {item['query'][:60]} " f"| `{item['expected']}` " f"| " + " | ".join(cells) + " |")
 
     lines += [
         "\n---\n",
@@ -562,8 +574,9 @@ def _render_markdown(
 # Entrypoint
 # ---------------------------------------------------------------------------
 
+
 async def run_benchmark(runs: int, output_path: Path) -> None:
-    from app.llm_factory import build_llm  # noqa: PLC0415
+    from app.llm_factory import build_llm
 
     intent_dataset = _load_intent_dataset()
     print(f"Loaded {len(intent_dataset)} routing queries from {INTENT_DATASET_PATH.name}")
@@ -606,7 +619,8 @@ async def run_benchmark(runs: int, output_path: Path) -> None:
                     summary.latencies.append(r.latency_s)
                     summary.total_cost_usd += r.cost_usd
                     summary.__dict__["_runs"].append(r)
-                    print(f"  T{i+1} run{run_i+1}: acc={r.score*100:.0f}% lat={r.latency_s:.2f}s cost=${r.cost_usd:.5f}")
+                    acc = (r.score or 0) * 100
+                    print(f"  T{i+1} run{run_i+1}: acc={acc:.0f}% lat={r.latency_s:.2f}s cost=${r.cost_usd:.5f}")
                 except Exception as e:
                     print(f"  T{i+1} run{run_i+1}: ERROR {e}")
 

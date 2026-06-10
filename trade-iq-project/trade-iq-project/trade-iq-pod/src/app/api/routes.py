@@ -1,4 +1,5 @@
 """FastAPI router — agent endpoints."""
+
 from fastapi import APIRouter, HTTPException
 
 from app.agents.orchestrator import OrchestratorAgent

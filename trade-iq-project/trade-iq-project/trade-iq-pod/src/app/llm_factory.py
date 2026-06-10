@@ -3,10 +3,14 @@
 Uses LangChain's `init_chat_model` so all agents receive a `BaseChatModel`
 regardless of underlying provider (Azure OpenAI, OpenAI, Anthropic, Ollama…).
 """
+
+from typing import Any
+
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 
-from app.config import Settings, settings as _default_settings
+from app.config import Settings
+from app.config import settings as _default_settings
 
 
 def build_llm(
@@ -30,7 +34,7 @@ def build_llm(
     resolved_model = model or cfg.llm_model
     resolved_provider = provider or cfg.llm_provider
 
-    provider_kwargs: dict[str, object] = {}
+    provider_kwargs: dict[str, Any] = {}
 
     if resolved_provider == "azure_openai":
         provider_kwargs = {

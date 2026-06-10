@@ -2,6 +2,7 @@
 
 Replace the stub logic with real implementation.
 """
+
 from langchain_core.tools import tool
 
 

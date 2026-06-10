@@ -1,4 +1,5 @@
 """Pydantic models shared across API, agents, and tools."""
+
 from pydantic import BaseModel, Field
 
 

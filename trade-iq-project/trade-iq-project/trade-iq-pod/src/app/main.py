@@ -3,6 +3,7 @@
 All dependency wiring lives here — LLMs built once at startup,
 injected into agents, agents injected into routes.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -34,7 +35,7 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def correlation_id_middleware(
         request: Request,
-        call_next: "Callable[[Request], Awaitable[Response]]",
+        call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         """Attach X-Request-ID to every request and response."""
         import structlog.contextvars

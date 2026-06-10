@@ -3,6 +3,7 @@
 Receives the user query, decides which subagents/tools to invoke,
 aggregates results, and returns a final response.
 """
+
 from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
 
@@ -10,7 +11,6 @@ from app.agents.subagent_a import SubagentA
 from app.agents.subagent_b import SubagentB
 from app.config import settings
 from app.tools.sample_tool import sample_tool
-
 
 SYSTEM_PROMPT = """You are a senior orchestrator agent.
 You have access to tools and two specialised subagents (A and B).
@@ -42,9 +42,7 @@ class OrchestratorAgent:
         result_a = await self._subagent_a.run(query)
         result_b = await self._subagent_b.run(query)
 
-        enriched_input = (
-            f"{query}\n\n[SubagentA context]: {result_a}\n[SubagentB context]: {result_b}"
-        )
+        enriched_input = f"{query}\n\n[SubagentA context]: {result_a}\n[SubagentB context]: {result_b}"
         output = await self._agent.ainvoke({"messages": [{"role": "user", "content": enriched_input}]})
         messages = output.get("messages", [])
         return str(messages[-1].content) if messages else ""

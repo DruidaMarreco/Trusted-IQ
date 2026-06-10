@@ -3,6 +3,7 @@
 Receives delegated work from the orchestrator.
 Replace stub logic with real chain / retriever / tool calls.
 """
+
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 

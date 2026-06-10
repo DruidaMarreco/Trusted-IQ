@@ -1,6 +1,8 @@
 """Shared pytest fixtures."""
-import pytest
+
 from unittest.mock import AsyncMock
+
+import pytest
 
 from app.agents.orchestrator import OrchestratorAgent
 
@@ -15,7 +17,5 @@ def mock_orchestrator(monkeypatch: pytest.MonkeyPatch) -> OrchestratorAgent:
     agent._subagent_b.run = AsyncMock(return_value="subagent_b_result")
     # Mock new langchain 0.3+ agent (CompiledStateGraph)
     agent._agent = AsyncMock()  # type: ignore[attr-defined]
-    agent._agent.ainvoke = AsyncMock(
-        return_value={"messages": [AsyncMock(content="final_answer")]}
-    )
+    agent._agent.ainvoke = AsyncMock(return_value={"messages": [AsyncMock(content="final_answer")]})
     return agent
