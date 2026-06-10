@@ -1,0 +1,5 @@
+# Claude Code internal/session data accidentally nested under .claude/.claude/.
+# Contains machine-local logs, telemetry, plugin caches, and secrets.
+# Keep only the curated skills; ignore everything else.
+.claude/.claude/*
+!.claude/.claude/skills/
