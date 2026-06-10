@@ -19,8 +19,8 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Linting: black (format check) + ruff (lint). No project deps needed, so we
-  # run both as ephemeral tools via `uvx` for speed.
+  # Linting: black (format check) + ruff (lint). Both are pinned dev deps, run
+  # via `uv run` so CI uses the exact versions from uv.lock (same as local).
   # ---------------------------------------------------------------------------
   lint:
     name: Lint (black, ruff)
@@ -35,10 +35,12 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: trade-iq-project/trade-iq-project/trade-iq-pod/uv.lock
+      - name: Install dependencies
+        run: uv sync --group dev
       - name: black --check
-        run: uvx black --check --diff .
+        run: uv run black --check --diff .
       - name: ruff check
-        run: uvx ruff check --output-format=github .
+        run: uv run ruff check --output-format=github .
 
   # ---------------------------------------------------------------------------
   # Type checking with ty (Astral's type checker). Needs project deps installed
@@ -60,7 +62,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
       - name: ty check
-        run: uvx ty check
+        run: uv run ty check
 
   # ---------------------------------------------------------------------------
   # Unit tests + coverage. Coverage is REPORTED but not gated yet:

@@ -18,10 +18,10 @@ lint:
 	python -m uv run ruff check .
 
 format:
-	python -m uv run ruff format .
+	python -m uv run black .
 
 type-check:
-	python -m uv run mypy .
+	python -m uv run ty check
 
 test:
 	python -m uv run pytest tests/unit --cov --cov-report=term-missing

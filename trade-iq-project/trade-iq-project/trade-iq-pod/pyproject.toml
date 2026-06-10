@@ -24,8 +24,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "black",
     "ruff",
-    "mypy",
+    "ty",
     "pre-commit",
     "pytest",
     "pytest-cov",
@@ -55,13 +56,6 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
-
-[tool.mypy]
-python_version = "3.13"
-strict = true
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
