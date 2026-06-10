@@ -32,6 +32,7 @@ from typing import Any, cast
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.config import Settings
 from app.eval import classified_intent, groundedness_overlap
 from app.metrics import estimate_cost
 from app.prompts import (
@@ -41,7 +42,11 @@ from app.prompts import (
     RESPONSE_SYSTEM_PROMPT,
     RESPONSE_USER_TEMPLATE,
 )
-from app.tpo_tools import route_to_tool
+from app.tools import route_to_tool
+
+# The evaluation always uses deterministic mock tool output (empty tool URLs),
+# so groundedness scores stay reproducible and never depend on live services.
+_EVAL_CFG = Settings(cdt_base_url="", erdc_base_url="")
 
 INTENT_DATASET_PATH = Path(__file__).parent.parent / "tests" / "data" / "intent_dataset.json"
 
@@ -254,7 +259,9 @@ async def _evaluate_model(
 
     # 2. Grounded response generation, judged (per-question records + usage).
     for case in GROUNDED_CASES:
-        tool_name, tool_desc, tool_output = route_to_tool(str(case["intent"]), dict(case["params"]))
+        tool_name, tool_desc, tool_output = await route_to_tool(
+            str(case["intent"]), dict(case["params"]), _EVAL_CFG, query=str(case["query"])
+        )
         user = RESPONSE_USER_TEMPLATE.format(
             query=case["query"],
             intent=case["intent"],

@@ -16,9 +16,9 @@ user query
 Intent Classifier  (src/app/prompts.py : INTENT_SYSTEM_PROMPT, PROMPT-001)
    │  → { intent, confidence, extracted_params, clarifying_question }
    ▼
-route_to_tool()    (src/app/tpo_tools.py)
-   ├─ DATA_QUERY     → text_to_sql_lookup   (CDT TextToSQL agent over SQL MI)
-   ├─ OPTIMIZER_RUN  → optimizer_run        (ERDC Optimizer API)
+route_to_tool()    (src/app/tools/)
+   ├─ DATA_QUERY     → CDT TextToSQL agent over SQL MI   (live HTTP or mock fallback)
+   ├─ OPTIMIZER_RUN  → ERDC Optimizer API                (live HTTP or mock fallback)
    ├─ CLARIFICATION  → ask one follow-up question
    └─ OUT_OF_SCOPE   → politely decline
    │  → tool_output (JSON: rows / ranked options)
@@ -58,7 +58,7 @@ appear in the tool output).
 | `llm_factory.py` | `build_llm()` — provider-agnostic chat model (Azure/OpenAI/Anthropic/Ollama, Claude Code, or an OpenAI-compatible proxy) |
 | `claude_code_llm.py` | `ChatClaudeCode` — LangChain model backed by the Claude Agent SDK (subscription quota) |
 | `prompts.py` | Canonical PROMPT-001 (intent) and PROMPT-002 (response) |
-| `tpo_tools.py` | Mock CDT TextToSQL + ERDC Optimizer tools over synthetic data |
+| `tools/` | CDT TextToSQL + ERDC Optimizer integrations — live HTTP (`cdt.py`, `erdc.py`, `http.py`) with deterministic `mock.py` fallback; `registry.py` routes intents |
 | `eval.py` | Pure helpers: intent parsing + groundedness figure-overlap |
 | `api/routes.py` | `/agent/invoke` endpoint |
 | `schemas/models.py` | Request/response models |

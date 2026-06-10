@@ -1,11 +1,11 @@
 """Agent orchestrator — the thin-orchestrator flow for the TradeIQ Sales Assistant.
 
-    classify intent (PROMPT-001)  ->  route to a tool (tpo_tools)  ->  grounded
+    classify intent (PROMPT-001)  ->  route to a tool (app.tools)  ->  grounded
     response (PROMPT-002)
 
 Provider-agnostic: the chat model is injected (Azure OpenAI GPT-4o in
 production via build_llm). Extensible: new intents/tools are added in
-tpo_tools.route_to_tool; this control flow stays the same — the seed of the
+app.tools.route_to_tool; this control flow stays the same — the seed of the
 wider agentic framework.
 """
 
@@ -31,7 +31,7 @@ from app.prompts import (
     RESPONSE_SYSTEM_PROMPT,
     RESPONSE_USER_TEMPLATE,
 )
-from app.tpo_tools import route_to_tool
+from app.tools import ToolError, route_to_tool
 
 logger = structlog.get_logger(__name__)
 
@@ -40,6 +40,7 @@ OUT_OF_SCOPE_REPLY = (
     "Could you rephrase your question in that context?"
 )
 DEFAULT_CLARIFY = "Could you add a bit more detail — which account, period, budget or objective?"
+TOOL_UNAVAILABLE_REPLY = "Sorry — I couldn't reach the data service just now. Please try again in a moment."
 
 
 @dataclass
@@ -131,8 +132,18 @@ class OrchestratorAgent:
                 answer=OUT_OF_SCOPE_REPLY, intent="OUT_OF_SCOPE", confidence=confidence, params=params, metrics=metrics
             )
 
-        # 2b. Route to the tool for this intent.
-        tool_name, tool_description, tool_output = route_to_tool(intent, params)
+        # 2b. Route to the tool for this intent (live service or mock fallback).
+        try:
+            tool_name, tool_description, tool_output = await route_to_tool(intent, params, self._cfg, query=query)
+        except ToolError as exc:
+            logger.error("tool_failed", intent=intent, error=str(exc), **metrics.as_dict())
+            return OrchestratorResult(
+                answer=TOOL_UNAVAILABLE_REPLY,
+                intent=intent,
+                confidence=confidence,
+                params=params,
+                metrics=metrics,
+            )
         logger.info("tool_invoked", tool=tool_name, intent=intent)
 
         # 3. Generate a grounded response from the tool output.

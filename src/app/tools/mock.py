@@ -1,12 +1,9 @@
-"""Mock TPO tools — stand-ins for the CDT TextToSQL agent and ERDC Optimizer API.
+"""Deterministic mock TPO tools — used when the live CDT/ERDC services are not
+configured (local dev, unit tests, model evaluation).
 
-They return deterministic, grounded JSON (the shape the real SQL MI / optimizer
-output would have) so the Response Generator and the groundedness evaluation
-have concrete data to work from. Synthetic data only — no client data.
-
-Flow they support (thin orchestrator):
-    DATA_QUERY    -> text_to_sql_lookup  (CDT TextToSQL agent)
-    OPTIMIZER_RUN -> optimizer_run       (ERDC Optimizer API)
+They return the same JSON shape the real SQL MI / optimizer output would have so
+the Response Generator and the groundedness evaluation have concrete data to
+work from. Synthetic data only — no client data.
 """
 
 from __future__ import annotations
@@ -114,12 +111,3 @@ def optimizer_run(params: dict[str, Any]) -> dict[str, Any]:
         "budget_used": spent,
         "budget_utilisation_pct": round(spent / budget * 100, 1) if budget else 0.0,
     }
-
-
-def route_to_tool(intent: str, params: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
-    """Route a classified intent to its tool. Returns (tool_name, description, output)."""
-    if intent == "DATA_QUERY":
-        return ("text_to_sql_lookup", "CDT TextToSQL agent over SQL MI", text_to_sql_lookup(params))
-    if intent == "OPTIMIZER_RUN":
-        return ("optimizer_run", "ERDC Optimizer API", optimizer_run(params))
-    return ("none", "no tool invoked", {})

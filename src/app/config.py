@@ -49,6 +49,17 @@ class Settings(BaseSettings):
     # --- Anthropic ---
     anthropic_api_key: SecretStr = SecretStr("")
 
+    # --- TPO tool backends (CDT TextToSQL agent, ERDC Optimizer API) ---
+    # When a base URL is set, the orchestrator calls the live service over HTTP;
+    # otherwise it falls back to deterministic mock output (dev/test/eval).
+    cdt_base_url: str = Field(default="", description="CDT TextToSQL service base URL")
+    cdt_api_key: SecretStr = SecretStr("")
+    cdt_timeout_s: float = 30.0
+    erdc_base_url: str = Field(default="", description="ERDC Optimizer API base URL")
+    erdc_api_key: SecretStr = SecretStr("")
+    erdc_timeout_s: float = 30.0
+    tool_max_retries: int = Field(default=2, ge=0, description="Retries on transient tool HTTP failures")
+
     # --- Per-agent model overrides (optional) ---
     orchestrator_model: str = Field(default="", description="Override LLM model for orchestrator")
     subagent_a_model: str = Field(default="", description="Override LLM model for subagent A")

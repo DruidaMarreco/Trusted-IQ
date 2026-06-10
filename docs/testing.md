@@ -17,8 +17,9 @@ make test          # pytest + coverage (config in pyproject [tool.pytest])
   relaxed in CI (`--cov-fail-under=0`) until the suite grows.
 - Ground-truth data shared with the metrics tier lives in `src/tests/data/`.
 
-Current coverage: the pure helpers (`eval.py`), tools (`tpo_tools.py`), the LLM
-factory routing, the orchestrator and the sample tool.
+Current coverage: the pure helpers (`eval.py`), the tool integrations (`app/tools/` —
+CDT/ERDC live HTTP path, mock fallback, routing and error handling), the LLM
+factory routing and the orchestrator.
 
 ## 2. Integration testing — `src/integration_testing/test.py`
 
