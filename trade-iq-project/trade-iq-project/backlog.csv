@@ -1,0 +1,11 @@
+Work Item Type,Title,Description,Parent
+Task,Create Azure DevOps repository,Initial repo creation,43
+Task,Initialize repository with README,Add README + CONTRIBUTING + CHANGELOG + SECURITY + LICENSE + ADRs,43
+Task,Configure .gitignore,Ignore venv / secrets / build artifacts,43
+Task,Create project folder structure,Scaffold src/app + tests + scripts + docs/adr,43
+Task,Add agents module,Create orchestrator + subagent_a + subagent_b under src/app/agents/,43
+Task,Add tests folder,Create tests/unit and tests/integration with conftest,43
+Task,Add initial boilerplate code,Scaffold FastAPI app factory + routes + schemas + tools,43
+Task,Setup dependencies and local dev environment,pyproject.toml with uv groups + lockfile + Makefile targets + pre-commit hooks,43
+Task,Initial commit and push to main branch,First commit with full project structure and push to Azure DevOps,43
+Task,Add observability and config,structlog + correlation ID middleware + health endpoints + pydantic-settings config,43
