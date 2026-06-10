@@ -18,8 +18,14 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", description="Logging level")
 
     # --- Provider selection ---
-    llm_provider: str = "azure_openai"  # azure_openai | openai | anthropic | ollama
-    llm_model: str = "gpt-4o"
+    llm_provider: str = "azure_openai"  # azure_openai | openai | anthropic | claude_code | ollama
+    # Orchestrator model — selected by the model evaluation (results/model_eval.*):
+    # Claude Opus 4.8 ranked #1 (composite 0.955; 100% intent accuracy, top
+    # groundedness). Pair with LLM_PROVIDER=claude_code (dev/test, subscription
+    # quota) or anthropic. Haiku is the cost-sensitive fallback (composite 0.932).
+    # For Azure OpenAI production, re-run `evaluate_models.py --backend providers`
+    # to compare GPT deployments and pin the winner here.
+    llm_model: str = "claude-opus-4-8"
 
     # --- Model proxy (optional, OpenAI-compatible gateway / LiteLLM) ---
     # When llm_proxy_base_url is set, ALL models are routed through this single
