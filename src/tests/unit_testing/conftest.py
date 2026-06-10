@@ -1,21 +1,22 @@
-"""Shared pytest fixtures."""
+"""Shared pytest fixtures for unit tests."""
 
+from collections.abc import Callable
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
-
-from app.agents.orchestrator import OrchestratorAgent
+from langchain_core.language_models import BaseChatModel
 
 
 @pytest.fixture
-def mock_orchestrator(monkeypatch: pytest.MonkeyPatch) -> OrchestratorAgent:
-    """OrchestratorAgent with LLM calls mocked out."""
-    agent = OrchestratorAgent.__new__(OrchestratorAgent)
-    agent._subagent_a = AsyncMock()  # type: ignore[attr-defined]
-    agent._subagent_a.run = AsyncMock(return_value="subagent_a_result")
-    agent._subagent_b = AsyncMock()  # type: ignore[attr-defined]
-    agent._subagent_b.run = AsyncMock(return_value="subagent_b_result")
-    # Mock new langchain 0.3+ agent (CompiledStateGraph)
-    agent._agent = AsyncMock()  # type: ignore[attr-defined]
-    agent._agent.ainvoke = AsyncMock(return_value={"messages": [AsyncMock(content="final_answer")]})
-    return agent
+def make_llm() -> Callable[..., BaseChatModel]:
+    """Factory for a fake chat model whose ``ainvoke`` returns the given message
+    contents in order (one per orchestration step). No network, no real LLM."""
+
+    def _factory(*contents: str) -> BaseChatModel:
+        llm = AsyncMock(spec=BaseChatModel)
+        llm.ainvoke = AsyncMock(side_effect=[SimpleNamespace(content=c) for c in contents])
+        return cast(BaseChatModel, llm)
+
+    return _factory

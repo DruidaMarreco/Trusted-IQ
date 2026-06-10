@@ -28,6 +28,9 @@ async def invoke_agent(request: AgentRequest) -> AgentResponse:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return AgentResponse(
-        result=result,
+        result=result.answer,
+        intent=result.intent,
+        tool=result.tool,
         session_id=request.session_id,
+        metadata={"confidence": result.confidence, "params": result.params},
     )

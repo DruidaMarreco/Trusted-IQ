@@ -13,8 +13,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 
 from app.agents.orchestrator import OrchestratorAgent
-from app.agents.subagent_a import SubagentA
-from app.agents.subagent_b import SubagentB
 from app.api.routes import router, set_orchestrator
 from app.config import settings
 from app.llm_factory import build_llm
@@ -54,18 +52,9 @@ def create_app() -> FastAPI:
     async def readyz() -> dict[str, str]:
         return {"status": "ok", "version": settings.app_version}
 
-    # Build LLMs — each agent can use a different model/provider
+    # Build the orchestrator LLM (Azure OpenAI in production via LLM_PROVIDER).
     orchestrator_llm = build_llm(model=settings.orchestrator_model or None)
-    subagent_a_llm = build_llm(model=settings.subagent_a_model or None)
-    subagent_b_llm = build_llm(model=settings.subagent_b_model or None)
-
-    # Wire agents
-    orchestrator = OrchestratorAgent(
-        llm=orchestrator_llm,
-        subagent_a=SubagentA(subagent_a_llm),
-        subagent_b=SubagentB(subagent_b_llm),
-    )
-    set_orchestrator(orchestrator)
+    set_orchestrator(OrchestratorAgent(llm=orchestrator_llm))
 
     app.include_router(router)
     logger.info("app_started", env=settings.env, version=settings.app_version)
