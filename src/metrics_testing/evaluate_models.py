@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import csv
 import html
 import json
 import statistics
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -36,6 +37,7 @@ from app.metrics import estimate_cost
 from app.prompts import (
     INTENT_SYSTEM_PROMPT,
     INTENT_USER_TEMPLATE,
+    INTENTS,
     RESPONSE_SYSTEM_PROMPT,
     RESPONSE_USER_TEMPLATE,
 )
@@ -96,6 +98,9 @@ tr.bad { background: #fdecea; }
 .rec { margin: 1rem 0; padding: .75rem; background: #e8f5e9; border-left: 4px solid #2e7d32; }
 small { color: #888; }
 .ans { max-width: 460px; white-space: pre-wrap; font-size: .85rem; text-align: left; }
+pre { white-space: pre-wrap; font-size: .72rem; margin: 0; max-width: 380px; }
+details summary { cursor: pointer; color: #0b5fff; }
+svg text { fill: #1a1a1a; }
 """
 
 
@@ -127,6 +132,8 @@ class ResponseRecord:
     figure_overlap: float
     latency_ms: float
     cost_usd: float
+    params: str = "{}"
+    tool_output: str = "{}"
 
 
 @dataclass
@@ -168,6 +175,11 @@ class ModelScore:
         """Overall QUALITY score (0-1): intent accuracy + judged dims + figure overlap."""
         judged = self._avg(self.groundedness + self.relevance + self.fmt) / 5
         return statistics.mean([self.intent_accuracy, judged, self._avg(self.figure_overlap)])
+
+    @property
+    def value_index(self) -> float:
+        """Quality per US cent — composite / cost. Higher = better value."""
+        return round(self.composite / max(self.cost_usd, 1e-6) / 100, 1)
 
     def record_call(self, latency_ms: float, input_tokens: int, output_tokens: int) -> None:
         """Record usage metrics for one candidate-model call."""
@@ -284,6 +296,8 @@ async def _evaluate_model(
                 figure_overlap=overlap,
                 latency_ms=latency_ms,
                 cost_usd=round(estimate_cost(name, in_tok, out_tok), 6),
+                params=json.dumps(dict(case["params"])),
+                tool_output=json.dumps(tool_output),
             )
         )
     print(
@@ -301,19 +315,53 @@ def _render_report(scores: list[ModelScore], intent_n: int, timestamp: str) -> s
         f"Generated: {timestamp} · Intent cases: {intent_n} · Grounded response cases: {len(GROUNDED_CASES)}",
         "",
         "| Model | Intent acc. | Groundedness /5 | Figure overlap | Relevance /5 | Format /5 "
-        "| Avg latency (ms) | Cost (USD) | Tokens | Composite |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| Avg latency (ms) | Cost (USD) | Tokens | Value | Composite |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for s in sorted(scores, key=lambda x: -x.composite):
         lines.append(
             f"| **{s.name}** | {s.intent_accuracy * 100:.1f}% | {s._avg(s.groundedness):.1f} "
             f"| {s._avg(s.figure_overlap) * 100:.0f}% | {s._avg(s.relevance):.1f} | {s._avg(s.fmt):.1f} "
-            f"| {s.avg_latency_ms:.0f} | ${s.cost_usd:.4f} | {s.total_tokens} | {s.composite:.3f} |"
+            f"| {s.avg_latency_ms:.0f} | ${s.cost_usd:.4f} | {s.total_tokens} | {s.value_index} | {s.composite:.3f} |"
         )
     if scores:
         best = max(scores, key=lambda x: x.composite)
         lines += ["", f"**Recommended:** {best.name} (composite {best.composite:.3f})."]
     return "\n".join(lines) + "\n"
+
+
+def _confusion(
+    scores: list[ModelScore],
+) -> tuple[list[str], dict[tuple[str, str], int], dict[str, list[int]]]:
+    """Aggregate confusion matrix + per-intent accuracy across all models."""
+    labels = [*INTENTS, "(unparsed)"]
+    matrix: dict[tuple[str, str], int] = {}
+    per_intent: dict[str, list[int]] = {i: [0, 0] for i in INTENTS}
+    for s in scores:
+        for rec in s.intent_records:
+            key = (rec.expected, rec.predicted)
+            matrix[key] = matrix.get(key, 0) + 1
+            if rec.expected in per_intent:
+                per_intent[rec.expected][1] += 1
+                if rec.correct:
+                    per_intent[rec.expected][0] += 1
+    return labels, matrix, per_intent
+
+
+def _svg_bars(ranked: list[ModelScore]) -> str:
+    """Inline SVG horizontal bar chart of composite scores (no JS)."""
+    bar_h, gap, width = 22, 8, 360
+    parts: list[str] = []
+    y = 0
+    for s in ranked:
+        bar_w = int(width * min(max(s.composite, 0.0), 1.0))
+        parts.append(
+            f'<text x="0" y="{y + 15}" font-size="12">{html.escape(s.name)}</text>'
+            f'<rect x="90" y="{y}" width="{bar_w}" height="{bar_h}" rx="2" fill="#0b5fff"></rect>'
+            f'<text x="{95 + bar_w}" y="{y + 15}" font-size="11">{s.composite:.3f}</text>'
+        )
+        y += bar_h + gap
+    return f'<svg width="520" height="{max(y, 1)}" role="img" aria-label="composite scores">{"".join(parts)}</svg>'
 
 
 def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str) -> str:
@@ -328,7 +376,7 @@ def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str) -> str
         f"<td>{s.intent_accuracy * 100:.1f}%</td><td>{s._avg(s.groundedness):.1f}</td>"
         f"<td>{s._avg(s.figure_overlap) * 100:.0f}%</td><td>{s._avg(s.relevance):.1f}</td>"
         f"<td>{s._avg(s.fmt):.1f}</td><td>{s.avg_latency_ms:.0f}</td><td>${s.cost_usd:.4f}</td>"
-        f"<td>{s.total_tokens}</td><td><strong>{s.composite:.3f}</strong></td></tr>"
+        f"<td>{s.total_tokens}</td><td>{s.value_index}</td><td><strong>{s.composite:.3f}</strong></td></tr>"
         for s in ranked
     )
     intent_rows = "".join(
@@ -342,10 +390,26 @@ def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str) -> str
         f'<tr><td class="l">{html.escape(rec.model)}</td><td class="l">{html.escape(rec.query)}</td>'
         f"<td>{rec.intent}</td><td>{html.escape(rec.tool)}</td><td>{rec.groundedness:.0f}</td>"
         f"<td>{rec.relevance:.0f}</td><td>{rec.fmt:.0f}</td><td>{rec.figure_overlap * 100:.0f}%</td>"
-        f'<td class="ans">{html.escape(rec.answer)}</td></tr>'
+        f'<td class="ans">{html.escape(rec.answer)}</td>'
+        f'<td class="l"><details><summary>data</summary><pre>{html.escape(rec.tool_output)}</pre></details></td></tr>'
         for s in ranked
         for rec in s.response_records
     )
+
+    labels, matrix, per_intent = _confusion(scores)
+    conf_head = "".join(f"<th>{p}</th>" for p in labels)
+    conf_body = ""
+    for expected in INTENTS:
+        cells = ""
+        for predicted in labels:
+            n = matrix.get((expected, predicted), 0)
+            cls = "best" if (expected == predicted and n) else ("bad" if (expected != predicted and n) else "")
+            cells += f'<td class="{cls}">{n or ""}</td>'
+        correct, total = per_intent[expected]
+        conf_body += (
+            f'<tr><td class="l">{expected}</td>{cells}<td>{(correct / total * 100) if total else 0:.0f}%</td></tr>'
+        )
+
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>TradeIQ TPO — Model Evaluation</title>
@@ -354,32 +418,124 @@ def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str) -> str
 <div class="meta">Generated: {timestamp} &middot; Intent cases: {intent_n}
 &middot; Grounded cases: {len(GROUNDED_CASES)}</div>
 <div class="rec"><strong>Recommended:</strong> {html.escape(best.name)} (composite {best.composite:.3f})</div>
+<h2>Composite score</h2>
+{_svg_bars(ranked)}
 <h2>Summary</h2>
 <table><thead><tr><th class="l">Model</th><th>Intent acc.</th><th>Groundedness /5</th>
 <th>Figure overlap</th><th>Relevance /5</th><th>Format /5</th><th>Avg latency (ms)</th>
-<th>Cost (USD)</th><th>Tokens</th><th>Composite</th></tr></thead>
+<th>Cost (USD)</th><th>Tokens</th><th>Value</th><th>Composite</th></tr></thead>
 <tbody>{summary}</tbody></table>
+<h2>Intent confusion matrix (row = expected, col = predicted)</h2>
+<table><thead><tr><th class="l">expected \\ predicted</th>{conf_head}<th>Accuracy</th></tr></thead>
+<tbody>{conf_body}</tbody></table>
 <h2>Intent classification — per question</h2>
 <table><thead><tr><th class="l">Model</th><th class="l">Question</th><th>Expected</th>
 <th>Predicted</th><th>Result</th><th>Latency (ms)</th></tr></thead>
 <tbody>{intent_rows}</tbody></table>
 <h2>Grounded responses — per question</h2>
 <table><thead><tr><th class="l">Model</th><th class="l">Question</th><th>Intent</th><th>Tool</th>
-<th>Grounded /5</th><th>Relevance /5</th><th>Format /5</th><th>Figure overlap</th><th class="l">Answer</th></tr></thead>
+<th>Grounded /5</th><th>Relevance /5</th><th>Format /5</th><th>Figure overlap</th>
+<th class="l">Answer</th><th class="l">Tool output</th></tr></thead>
 <tbody>{response_rows}</tbody></table>
-<p><small>Groundedness = answer uses only tool output (LLM judge + figure-overlap check).
-Cost is estimated from published token prices; Claude Code usage is subscription-quota billed.</small></p>
+<p><small>Value = composite quality per US cent of estimated cost. Groundedness = answer uses only tool
+output (LLM judge + figure-overlap check). Claude Code usage is subscription-quota billed.</small></p>
 </body></html>
 """
 
 
-def _write_xlsx(scores: list[ModelScore], path: Path) -> None:
-    """Write a workbook with Summary, Intent and Responses sheets."""
+_HISTORY_HEADER = [
+    "timestamp",
+    "model",
+    "intent_acc",
+    "groundedness",
+    "relevance",
+    "format",
+    "figure_overlap",
+    "avg_latency_ms",
+    "cost_usd",
+    "value_index",
+    "composite",
+]
+
+
+def _append_history(scores: list[ModelScore], timestamp: str, path: Path) -> list[list[str]]:
+    """Append this round's per-model summary to the cumulative history CSV."""
+    write_header = not path.exists()
+    with path.open("a", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        if write_header:
+            writer.writerow(_HISTORY_HEADER)
+        for s in scores:
+            writer.writerow(
+                [
+                    timestamp,
+                    s.name,
+                    round(s.intent_accuracy * 100, 1),
+                    round(s._avg(s.groundedness), 2),
+                    round(s._avg(s.relevance), 2),
+                    round(s._avg(s.fmt), 2),
+                    round(s._avg(s.figure_overlap) * 100, 0),
+                    round(s.avg_latency_ms, 0),
+                    round(s.cost_usd, 6),
+                    s.value_index,
+                    round(s.composite, 3),
+                ]
+            )
+    with path.open(encoding="utf-8") as fh:
+        return list(csv.reader(fh))
+
+
+def _export_json(scores: list[ModelScore], intent_n: int, timestamp: str, backend: str) -> str:
+    """Machine-readable artifact: summary + every per-question record."""
+    payload = {
+        "timestamp": timestamp,
+        "backend": backend,
+        "intent_cases": intent_n,
+        "grounded_cases": len(GROUNDED_CASES),
+        "models": [
+            {
+                "model": s.name,
+                "intent_accuracy": round(s.intent_accuracy, 4),
+                "groundedness": round(s._avg(s.groundedness), 3),
+                "relevance": round(s._avg(s.relevance), 3),
+                "format": round(s._avg(s.fmt), 3),
+                "figure_overlap": round(s._avg(s.figure_overlap), 3),
+                "avg_latency_ms": s.avg_latency_ms,
+                "cost_usd": s.cost_usd,
+                "input_tokens": s.input_tokens,
+                "output_tokens": s.output_tokens,
+                "value_index": s.value_index,
+                "composite": round(s.composite, 4),
+                "intent_records": [asdict(r) for r in s.intent_records],
+                "response_records": [asdict(r) for r in s.response_records],
+            }
+            for s in scores
+        ],
+    }
+    return json.dumps(payload, indent=2)
+
+
+def _write_xlsx(scores: list[ModelScore], path: Path, history_rows: list[list[str]]) -> None:
+    """Workbook: Summary, Intent, Responses, Confusion, Trend — with conditional formatting."""
     from openpyxl import Workbook
-    from openpyxl.styles import Font
+    from openpyxl.formatting.rule import CellIsRule, ColorScaleRule
+    from openpyxl.styles import Font, PatternFill
 
     wb = Workbook()
     bold = Font(bold=True)
+    green = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    red = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    score_scale = ColorScaleRule(
+        start_type="num",
+        start_value=1,
+        start_color="FFC7CE",
+        mid_type="num",
+        mid_value=3,
+        mid_color="FFEB9C",
+        end_type="num",
+        end_value=5,
+        end_color="C6EFCE",
+    )
 
     def _fill(ws: Any, headers: list[str], rows: list[list[Any]]) -> None:
         ws.append(headers)
@@ -403,6 +559,7 @@ def _write_xlsx(scores: list[ModelScore], path: Path) -> None:
             "Cost USD",
             "Input tokens",
             "Output tokens",
+            "Value index",
             "Composite",
         ],
         [
@@ -417,30 +574,59 @@ def _write_xlsx(scores: list[ModelScore], path: Path) -> None:
                 round(s.cost_usd, 6),
                 s.input_tokens,
                 s.output_tokens,
+                s.value_index,
                 round(s.composite, 3),
             ]
             for s in sorted(scores, key=lambda x: -x.composite)
         ],
     )
-    _fill(
-        wb.create_sheet("Intent"),
-        ["Model", "Question", "Expected intent", "Predicted intent", "Result", "Latency ms", "Cost USD"],
+
+    intent_rows = [
         [
-            [
-                r.model,
-                r.query,
-                r.expected,
-                r.predicted,
-                "PASS" if r.correct else "FAIL",
-                round(r.latency_ms, 0),
-                round(r.cost_usd, 6),
-            ]
-            for s in scores
-            for r in s.intent_records
-        ],
-    )
+            r.model,
+            r.query,
+            r.expected,
+            r.predicted,
+            "PASS" if r.correct else "FAIL",
+            round(r.latency_ms, 0),
+            round(r.cost_usd, 6),
+        ]
+        for s in scores
+        for r in s.intent_records
+    ]
+    intent_ws = wb.create_sheet("Intent")
     _fill(
-        wb.create_sheet("Responses"),
+        intent_ws,
+        ["Model", "Question", "Expected intent", "Predicted intent", "Result", "Latency ms", "Cost USD"],
+        intent_rows,
+    )
+    if intent_rows:
+        rng = f"E2:E{len(intent_rows) + 1}"
+        intent_ws.conditional_formatting.add(rng, CellIsRule(operator="equal", formula=['"PASS"'], fill=green))
+        intent_ws.conditional_formatting.add(rng, CellIsRule(operator="equal", formula=['"FAIL"'], fill=red))
+
+    resp_rows = [
+        [
+            r.model,
+            r.query,
+            r.intent,
+            r.tool,
+            r.groundedness,
+            r.relevance,
+            r.fmt,
+            round(r.figure_overlap * 100, 0),
+            round(r.latency_ms, 0),
+            round(r.cost_usd, 6),
+            r.answer,
+            r.params,
+            r.tool_output,
+        ]
+        for s in scores
+        for r in s.response_records
+    ]
+    resp_ws = wb.create_sheet("Responses")
+    _fill(
+        resp_ws,
         [
             "Model",
             "Question",
@@ -453,25 +639,36 @@ def _write_xlsx(scores: list[ModelScore], path: Path) -> None:
             "Latency ms",
             "Cost USD",
             "Answer",
+            "Tool params",
+            "Tool output",
         ],
+        resp_rows,
+    )
+    if resp_rows:
+        resp_ws.conditional_formatting.add(f"E2:G{len(resp_rows) + 1}", score_scale)
+
+    labels, matrix, per_intent = _confusion(scores)
+    confusion = wb.create_sheet("Confusion")
+    _fill(
+        confusion,
+        ["expected \\ predicted", *labels, "Accuracy %"],
         [
             [
-                r.model,
-                r.query,
-                r.intent,
-                r.tool,
-                r.groundedness,
-                r.relevance,
-                r.fmt,
-                round(r.figure_overlap * 100, 0),
-                round(r.latency_ms, 0),
-                round(r.cost_usd, 6),
-                r.answer,
+                e,
+                *[matrix.get((e, p), 0) for p in labels],
+                round(per_intent[e][0] / per_intent[e][1] * 100, 0) if per_intent[e][1] else 0,
             ]
-            for s in scores
-            for r in s.response_records
+            for e in INTENTS
         ],
     )
+
+    trend = wb.create_sheet("Trend")
+    for row in history_rows:
+        trend.append(row)
+    if trend[1]:
+        for cell in trend[1]:
+            cell.font = bold
+
     wb.save(str(path))
 
 
@@ -479,6 +676,7 @@ async def run_evaluation(intent_sample: int, output_path: Path, backend: str) ->
     from app.llm_factory import build_llm
 
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    slug = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     dataset: list[dict[str, str]] = json.loads(INTENT_DATASET_PATH.read_text(encoding="utf-8"))
     # The dataset is grouped by intent, so stride-sample to span all intents
     # even for a small --intent-sample.
@@ -501,14 +699,22 @@ async def run_evaluation(intent_sample: int, output_path: Path, backend: str) ->
         print(f"\n▶ {name}")
         scores.append(await _evaluate_model(name, llm, judge, intent_cases))
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    report = _render_report(scores, len(intent_cases), timestamp)
-    output_path.write_text(report, encoding="utf-8")
-    html_path = output_path.with_suffix(".html")
-    html_path.write_text(_render_html(scores, len(intent_cases), timestamp), encoding="utf-8")
-    xlsx_path = output_path.with_suffix(".xlsx")
-    _write_xlsx(scores, xlsx_path)
-    print(f"\n✅ Artifacts: {output_path} · {html_path} · {xlsx_path}\n")
+    n = len(intent_cases)
+    stem = output_path.with_suffix("")  # e.g. results/model_eval
+    stem.parent.mkdir(parents=True, exist_ok=True)
+    report = _render_report(scores, n, timestamp)
+    html_doc = _render_html(scores, n, timestamp)
+    json_doc = _export_json(scores, n, timestamp, backend)
+    history = _append_history(scores, timestamp, stem.with_name("model_eval_history.csv"))
+
+    # Write a timestamped set (history) and a "latest" set (easy to open).
+    for tag in (slug, "latest"):
+        stem.with_name(f"{stem.name}_{tag}.md").write_text(report, encoding="utf-8")
+        stem.with_name(f"{stem.name}_{tag}.html").write_text(html_doc, encoding="utf-8")
+        stem.with_name(f"{stem.name}_{tag}.json").write_text(json_doc, encoding="utf-8")
+        _write_xlsx(scores, stem.with_name(f"{stem.name}_{tag}.xlsx"), history)
+
+    print(f"\n✅ Round {slug} artifacts (.md/.html/.xlsx/.json + history.csv) in {stem.parent}\n")
     print(report)
 
 
