@@ -8,6 +8,13 @@ class AgentRequest(BaseModel):
 
     query: str = Field(..., description="User query to process")
     session_id: str | None = Field(default=None, description="Optional session identifier")
+    account_scope: str | None = Field(
+        default=None, description="Accounts the user covers, e.g. 'Tesco, Sainsbury's UK'"
+    )
+    planning_period: str | None = Field(default=None, description="Planning period context, e.g. 'FY2025 H1'")
+    history: list[dict[str, str]] | None = Field(
+        default=None, description="Prior conversation turns: [{'role': ..., 'content': ...}, ...]"
+    )
 
 
 class AgentResponse(BaseModel):
