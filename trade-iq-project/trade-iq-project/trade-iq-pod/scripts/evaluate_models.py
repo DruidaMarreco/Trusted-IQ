@@ -20,9 +20,10 @@ import argparse
 import asyncio
 import json
 import statistics
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -230,6 +231,9 @@ async def run_evaluation(intent_sample: int, output_path: Path, backend: str) ->
 
 
 def main() -> None:
+    # Windows consoles default to cp1252 and choke on the report's unicode
+    # (£, ▶, ·, …). Force UTF-8 output so the eval runs everywhere.
+    cast(Any, sys.stdout).reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="TradeIQ TPO model evaluation")
     parser.add_argument("--intent-sample", type=int, default=24, help="Number of intent cases to test (0 = all)")
     parser.add_argument("--output", type=Path, default=Path("results/model_eval.md"), help="Output markdown file")
