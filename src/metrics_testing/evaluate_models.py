@@ -18,10 +18,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import html
 import json
 import statistics
 import sys
+import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -29,6 +32,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.eval import classified_intent, groundedness_overlap
+from app.metrics import estimate_cost
 from app.prompts import (
     INTENT_SYSTEM_PROMPT,
     INTENT_USER_TEMPLATE,
@@ -78,33 +82,51 @@ Score each dimension 1-5 (5 = best) and return ONLY a JSON object:
 ACCOUNT_SCOPE = "All UK & EU grocery accounts"
 PLANNING_PERIOD = "FY2025"
 
-_HTML_TEMPLATE = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<title>TradeIQ TPO — Model Evaluation</title>
-<style>
-body {{ font-family: system-ui, "Segoe UI", Arial, sans-serif; margin: 2rem; color: #1a1a1a; }}
-h1 {{ font-size: 1.4rem; margin-bottom: .25rem; }}
-.meta {{ color: #666; margin-bottom: 1rem; }}
-table {{ border-collapse: collapse; width: 100%; max-width: 920px; }}
-th, td {{ border: 1px solid #ddd; padding: .5rem .75rem; text-align: right; }}
-th:first-child, td:first-child {{ text-align: left; }}
-thead {{ background: #0b5fff; color: #fff; }}
-tr.best {{ background: #e8f5e9; }}
-.rec {{ margin-top: 1rem; padding: .75rem; background: #e8f5e9; border-left: 4px solid #2e7d32; }}
-small {{ color: #888; }}
-</style></head><body>
-<h1>TradeIQ TPO — Model Evaluation</h1>
-<div class="meta">Intent cases: {intent_n} &middot; Grounded response cases: {n_cases}</div>
-<table><thead><tr>
-<th>Model</th><th>Intent acc.</th><th>Groundedness /5</th><th>Figure overlap</th>
-<th>Relevance /5</th><th>Format /5</th><th>Composite</th></tr></thead>
-<tbody>
-{rows}
-</tbody></table>
-<div class="rec"><strong>Recommended:</strong> {best} (composite {composite:.3f})</div>
-<p><small>Groundedness = answer uses only tool output (LLM judge + figure-overlap check).</small></p>
-</body></html>
+_CSS = """
+body { font-family: system-ui, "Segoe UI", Arial, sans-serif; margin: 2rem; color: #1a1a1a; }
+h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+h2 { font-size: 1.1rem; margin-top: 2rem; }
+.meta { color: #666; margin-bottom: 1rem; }
+table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
+th, td { border: 1px solid #ddd; padding: .4rem .6rem; text-align: right; vertical-align: top; }
+th.l, td.l { text-align: left; }
+thead { background: #0b5fff; color: #fff; }
+tr.best { background: #e8f5e9; }
+tr.bad { background: #fdecea; }
+.rec { margin: 1rem 0; padding: .75rem; background: #e8f5e9; border-left: 4px solid #2e7d32; }
+small { color: #888; }
+.ans { max-width: 460px; white-space: pre-wrap; font-size: .85rem; text-align: left; }
 """
+
+
+@dataclass
+class IntentRecord:
+    """One intent-classification question and its result."""
+
+    model: str
+    query: str
+    expected: str
+    predicted: str
+    correct: bool
+    latency_ms: float
+    cost_usd: float
+
+
+@dataclass
+class ResponseRecord:
+    """One grounded-response question and its judged result."""
+
+    model: str
+    query: str
+    intent: str
+    tool: str
+    answer: str
+    groundedness: float
+    relevance: float
+    fmt: float
+    figure_overlap: float
+    latency_ms: float
+    cost_usd: float
 
 
 @dataclass
@@ -116,6 +138,14 @@ class ModelScore:
     relevance: list[float] = field(default_factory=list)
     fmt: list[float] = field(default_factory=list)
     figure_overlap: list[float] = field(default_factory=list)
+    # Usage metrics (candidate-model calls only; judge calls excluded).
+    latencies_ms: list[float] = field(default_factory=list)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    # Per-question records for the data artifacts.
+    intent_records: list[IntentRecord] = field(default_factory=list)
+    response_records: list[ResponseRecord] = field(default_factory=list)
 
     @property
     def intent_accuracy(self) -> float:
@@ -126,10 +156,25 @@ class ModelScore:
         return statistics.mean(xs) if xs else 0.0
 
     @property
+    def avg_latency_ms(self) -> float:
+        return self._avg(self.latencies_ms)
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+    @property
     def composite(self) -> float:
-        """Overall score (0-1): intent accuracy + judged dims + figure overlap."""
+        """Overall QUALITY score (0-1): intent accuracy + judged dims + figure overlap."""
         judged = self._avg(self.groundedness + self.relevance + self.fmt) / 5
         return statistics.mean([self.intent_accuracy, judged, self._avg(self.figure_overlap)])
+
+    def record_call(self, latency_ms: float, input_tokens: int, output_tokens: int) -> None:
+        """Record usage metrics for one candidate-model call."""
+        self.latencies_ms.append(latency_ms)
+        self.input_tokens += input_tokens
+        self.output_tokens += output_tokens
+        self.cost_usd = round(self.cost_usd + estimate_cost(self.name, input_tokens, output_tokens), 6)
 
 
 def _parse_judge(text: str) -> dict[str, float]:
@@ -147,9 +192,15 @@ def _parse_judge(text: str) -> dict[str, float]:
     return out
 
 
-async def _complete(llm: BaseChatModel, system: str, user: str) -> str:
+async def _complete(llm: BaseChatModel, system: str, user: str) -> tuple[str, float, int, int]:
+    """Return (text, latency_ms, input_tokens, output_tokens) for one call."""
+    start = time.perf_counter()
     resp = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
-    return str(resp.content)
+    latency_ms = round((time.perf_counter() - start) * 1000, 1)
+    usage = getattr(resp, "usage_metadata", None)
+    in_tok = int(usage.get("input_tokens", 0)) if isinstance(usage, dict) else 0
+    out_tok = int(usage.get("output_tokens", 0)) if isinstance(usage, dict) else 0
+    return str(resp.content), latency_ms, in_tok, out_tok
 
 
 async def _evaluate_model(
@@ -160,22 +211,36 @@ async def _evaluate_model(
 ) -> ModelScore:
     score = ModelScore(name=name)
 
-    # 1. Intent classification accuracy.
+    # 1. Intent classification accuracy (per-question records + usage).
     for case in intent_cases:
         user = INTENT_USER_TEMPLATE.format(
             query=case["query"], history="[]", account_scope=ACCOUNT_SCOPE, planning_period=PLANNING_PERIOD
         )
         try:
-            text = await _complete(llm, INTENT_SYSTEM_PROMPT, user)
+            text, latency_ms, in_tok, out_tok = await _complete(llm, INTENT_SYSTEM_PROMPT, user)
         except Exception as exc:
             print(f"  intent ERROR ({case['query'][:40]}): {exc}")
             continue
         score.intent_total += 1
-        if classified_intent(text) == case["expected"]:
+        score.record_call(latency_ms, in_tok, out_tok)
+        predicted = classified_intent(text) or "(unparsed)"
+        correct = predicted == case["expected"]
+        if correct:
             score.intent_correct += 1
+        score.intent_records.append(
+            IntentRecord(
+                model=name,
+                query=case["query"],
+                expected=case["expected"],
+                predicted=predicted,
+                correct=correct,
+                latency_ms=latency_ms,
+                cost_usd=round(estimate_cost(name, in_tok, out_tok), 6),
+            )
+        )
     print(f"  intent accuracy: {score.intent_accuracy * 100:.1f}% ({score.intent_correct}/{score.intent_total})")
 
-    # 2. Grounded response generation, judged.
+    # 2. Grounded response generation, judged (per-question records + usage).
     for case in GROUNDED_CASES:
         tool_name, tool_desc, tool_output = route_to_tool(str(case["intent"]), dict(case["params"]))
         user = RESPONSE_USER_TEMPLATE.format(
@@ -188,43 +253,62 @@ async def _evaluate_model(
             planning_period=PLANNING_PERIOD,
         )
         try:
-            answer = await _complete(llm, RESPONSE_SYSTEM_PROMPT, user)
+            answer, latency_ms, in_tok, out_tok = await _complete(llm, RESPONSE_SYSTEM_PROMPT, user)
         except Exception as exc:
             print(f"  response ERROR ({case['query'][:40]}): {exc}")
             continue
 
-        score.figure_overlap.append(groundedness_overlap(answer, tool_output))
-        judged = _parse_judge(
-            await _complete(
-                judge,
-                "You are a strict, fair evaluator. Return only JSON.",
-                JUDGE_PROMPT.format(tool_output=json.dumps(tool_output, indent=2), query=case["query"], answer=answer),
+        score.record_call(latency_ms, in_tok, out_tok)
+        overlap = groundedness_overlap(answer, tool_output)
+        score.figure_overlap.append(overlap)
+        judge_text, *_ = await _complete(
+            judge,
+            "You are a strict, fair evaluator. Return only JSON.",
+            JUDGE_PROMPT.format(tool_output=json.dumps(tool_output, indent=2), query=case["query"], answer=answer),
+        )
+        judged = _parse_judge(judge_text)
+        g, r, f = judged.get("groundedness", 0.0), judged.get("relevance", 0.0), judged.get("format", 0.0)
+        score.groundedness.append(g)
+        score.relevance.append(r)
+        score.fmt.append(f)
+        score.response_records.append(
+            ResponseRecord(
+                model=name,
+                query=str(case["query"]),
+                intent=str(case["intent"]),
+                tool=tool_name,
+                answer=answer,
+                groundedness=g,
+                relevance=r,
+                fmt=f,
+                figure_overlap=overlap,
+                latency_ms=latency_ms,
+                cost_usd=round(estimate_cost(name, in_tok, out_tok), 6),
             )
         )
-        score.groundedness.append(judged.get("groundedness", 0.0))
-        score.relevance.append(judged.get("relevance", 0.0))
-        score.fmt.append(judged.get("format", 0.0))
     print(
         f"  groundedness: judge={score._avg(score.groundedness):.1f}/5 "
-        f"figure-overlap={score._avg(score.figure_overlap) * 100:.0f}%"
+        f"figure-overlap={score._avg(score.figure_overlap) * 100:.0f}% "
+        f"| avg latency {score.avg_latency_ms:.0f}ms · cost ${score.cost_usd:.4f}"
     )
     return score
 
 
-def _render_report(scores: list[ModelScore], intent_n: int) -> str:
+def _render_report(scores: list[ModelScore], intent_n: int, timestamp: str) -> str:
     lines = [
         "# TradeIQ TPO — Model Evaluation",
         "",
-        f"Intent cases: {intent_n} · Grounded response cases: {len(GROUNDED_CASES)}",
+        f"Generated: {timestamp} · Intent cases: {intent_n} · Grounded response cases: {len(GROUNDED_CASES)}",
         "",
-        "| Model | Intent acc. | Groundedness (judge /5) | Figure overlap | Relevance /5 | Format /5 | Composite |",
-        "|---|---|---|---|---|---|---|",
+        "| Model | Intent acc. | Groundedness /5 | Figure overlap | Relevance /5 | Format /5 "
+        "| Avg latency (ms) | Cost (USD) | Tokens | Composite |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for s in sorted(scores, key=lambda x: -x.composite):
         lines.append(
             f"| **{s.name}** | {s.intent_accuracy * 100:.1f}% | {s._avg(s.groundedness):.1f} "
-            f"| {s._avg(s.figure_overlap) * 100:.0f}% | {s._avg(s.relevance):.1f} "
-            f"| {s._avg(s.fmt):.1f} | {s.composite:.3f} |"
+            f"| {s._avg(s.figure_overlap) * 100:.0f}% | {s._avg(s.relevance):.1f} | {s._avg(s.fmt):.1f} "
+            f"| {s.avg_latency_ms:.0f} | ${s.cost_usd:.4f} | {s.total_tokens} | {s.composite:.3f} |"
         )
     if scores:
         best = max(scores, key=lambda x: x.composite)
@@ -232,35 +316,169 @@ def _render_report(scores: list[ModelScore], intent_n: int) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _render_html(scores: list[ModelScore], intent_n: int) -> str:
+def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str) -> str:
     ranked = sorted(scores, key=lambda x: -x.composite)
     if not ranked:
         return "<!doctype html><html><body><p>No results.</p></body></html>\n"
     best = ranked[0]
-    row_list: list[str] = []
-    for s in ranked:
-        cls = "best" if s.name == best.name else ""
-        row_list.append(
-            f'<tr class="{cls}"><td>{s.name}</td>'
-            f"<td>{s.intent_accuracy * 100:.1f}%</td>"
-            f"<td>{s._avg(s.groundedness):.1f}</td>"
-            f"<td>{s._avg(s.figure_overlap) * 100:.0f}%</td>"
-            f"<td>{s._avg(s.relevance):.1f}</td>"
-            f"<td>{s._avg(s.fmt):.1f}</td>"
-            f"<td><strong>{s.composite:.3f}</strong></td></tr>"
-        )
-    return _HTML_TEMPLATE.format(
-        intent_n=intent_n,
-        n_cases=len(GROUNDED_CASES),
-        rows="\n".join(row_list),
-        best=best.name,
-        composite=best.composite,
+
+    summary = "".join(
+        f'<tr class="{"best" if s.name == best.name else ""}">'
+        f'<td class="l">{html.escape(s.name)}</td>'
+        f"<td>{s.intent_accuracy * 100:.1f}%</td><td>{s._avg(s.groundedness):.1f}</td>"
+        f"<td>{s._avg(s.figure_overlap) * 100:.0f}%</td><td>{s._avg(s.relevance):.1f}</td>"
+        f"<td>{s._avg(s.fmt):.1f}</td><td>{s.avg_latency_ms:.0f}</td><td>${s.cost_usd:.4f}</td>"
+        f"<td>{s.total_tokens}</td><td><strong>{s.composite:.3f}</strong></td></tr>"
+        for s in ranked
     )
+    intent_rows = "".join(
+        f'<tr class="{"" if rec.correct else "bad"}"><td class="l">{html.escape(rec.model)}</td>'
+        f'<td class="l">{html.escape(rec.query)}</td><td>{rec.expected}</td><td>{rec.predicted}</td>'
+        f"<td>{'PASS' if rec.correct else 'FAIL'}</td><td>{rec.latency_ms:.0f}</td></tr>"
+        for s in ranked
+        for rec in s.intent_records
+    )
+    response_rows = "".join(
+        f'<tr><td class="l">{html.escape(rec.model)}</td><td class="l">{html.escape(rec.query)}</td>'
+        f"<td>{rec.intent}</td><td>{html.escape(rec.tool)}</td><td>{rec.groundedness:.0f}</td>"
+        f"<td>{rec.relevance:.0f}</td><td>{rec.fmt:.0f}</td><td>{rec.figure_overlap * 100:.0f}%</td>"
+        f'<td class="ans">{html.escape(rec.answer)}</td></tr>'
+        for s in ranked
+        for rec in s.response_records
+    )
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>TradeIQ TPO — Model Evaluation</title>
+<style>{_CSS}</style></head><body>
+<h1>TradeIQ TPO — Model Evaluation</h1>
+<div class="meta">Generated: {timestamp} &middot; Intent cases: {intent_n}
+&middot; Grounded cases: {len(GROUNDED_CASES)}</div>
+<div class="rec"><strong>Recommended:</strong> {html.escape(best.name)} (composite {best.composite:.3f})</div>
+<h2>Summary</h2>
+<table><thead><tr><th class="l">Model</th><th>Intent acc.</th><th>Groundedness /5</th>
+<th>Figure overlap</th><th>Relevance /5</th><th>Format /5</th><th>Avg latency (ms)</th>
+<th>Cost (USD)</th><th>Tokens</th><th>Composite</th></tr></thead>
+<tbody>{summary}</tbody></table>
+<h2>Intent classification — per question</h2>
+<table><thead><tr><th class="l">Model</th><th class="l">Question</th><th>Expected</th>
+<th>Predicted</th><th>Result</th><th>Latency (ms)</th></tr></thead>
+<tbody>{intent_rows}</tbody></table>
+<h2>Grounded responses — per question</h2>
+<table><thead><tr><th class="l">Model</th><th class="l">Question</th><th>Intent</th><th>Tool</th>
+<th>Grounded /5</th><th>Relevance /5</th><th>Format /5</th><th>Figure overlap</th><th class="l">Answer</th></tr></thead>
+<tbody>{response_rows}</tbody></table>
+<p><small>Groundedness = answer uses only tool output (LLM judge + figure-overlap check).
+Cost is estimated from published token prices; Claude Code usage is subscription-quota billed.</small></p>
+</body></html>
+"""
+
+
+def _write_xlsx(scores: list[ModelScore], path: Path) -> None:
+    """Write a workbook with Summary, Intent and Responses sheets."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    wb = Workbook()
+    bold = Font(bold=True)
+
+    def _fill(ws: Any, headers: list[str], rows: list[list[Any]]) -> None:
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.font = bold
+        for row in rows:
+            ws.append(row)
+
+    summary = wb.active
+    summary.title = "Summary"
+    _fill(
+        summary,
+        [
+            "Model",
+            "Intent acc %",
+            "Groundedness /5",
+            "Figure overlap %",
+            "Relevance /5",
+            "Format /5",
+            "Avg latency ms",
+            "Cost USD",
+            "Input tokens",
+            "Output tokens",
+            "Composite",
+        ],
+        [
+            [
+                s.name,
+                round(s.intent_accuracy * 100, 1),
+                round(s._avg(s.groundedness), 2),
+                round(s._avg(s.figure_overlap) * 100, 0),
+                round(s._avg(s.relevance), 2),
+                round(s._avg(s.fmt), 2),
+                round(s.avg_latency_ms, 0),
+                round(s.cost_usd, 6),
+                s.input_tokens,
+                s.output_tokens,
+                round(s.composite, 3),
+            ]
+            for s in sorted(scores, key=lambda x: -x.composite)
+        ],
+    )
+    _fill(
+        wb.create_sheet("Intent"),
+        ["Model", "Question", "Expected intent", "Predicted intent", "Result", "Latency ms", "Cost USD"],
+        [
+            [
+                r.model,
+                r.query,
+                r.expected,
+                r.predicted,
+                "PASS" if r.correct else "FAIL",
+                round(r.latency_ms, 0),
+                round(r.cost_usd, 6),
+            ]
+            for s in scores
+            for r in s.intent_records
+        ],
+    )
+    _fill(
+        wb.create_sheet("Responses"),
+        [
+            "Model",
+            "Question",
+            "Intent",
+            "Tool",
+            "Groundedness /5",
+            "Relevance /5",
+            "Format /5",
+            "Figure overlap %",
+            "Latency ms",
+            "Cost USD",
+            "Answer",
+        ],
+        [
+            [
+                r.model,
+                r.query,
+                r.intent,
+                r.tool,
+                r.groundedness,
+                r.relevance,
+                r.fmt,
+                round(r.figure_overlap * 100, 0),
+                round(r.latency_ms, 0),
+                round(r.cost_usd, 6),
+                r.answer,
+            ]
+            for s in scores
+            for r in s.response_records
+        ],
+    )
+    wb.save(str(path))
 
 
 async def run_evaluation(intent_sample: int, output_path: Path, backend: str) -> None:
     from app.llm_factory import build_llm
 
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     dataset: list[dict[str, str]] = json.loads(INTENT_DATASET_PATH.read_text(encoding="utf-8"))
     intent_cases = dataset[:intent_sample] if intent_sample > 0 else dataset
     print(f"Intent cases: {len(intent_cases)} | Grounded cases: {len(GROUNDED_CASES)} | backend: {backend}")
@@ -277,12 +495,14 @@ async def run_evaluation(intent_sample: int, output_path: Path, backend: str) ->
         print(f"\n▶ {name}")
         scores.append(await _evaluate_model(name, llm, judge, intent_cases))
 
-    report = _render_report(scores, len(intent_cases))
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    report = _render_report(scores, len(intent_cases), timestamp)
     output_path.write_text(report, encoding="utf-8")
     html_path = output_path.with_suffix(".html")
-    html_path.write_text(_render_html(scores, len(intent_cases)), encoding="utf-8")
-    print(f"\n✅ Reports saved → {output_path} and {html_path}\n")
+    html_path.write_text(_render_html(scores, len(intent_cases), timestamp), encoding="utf-8")
+    xlsx_path = output_path.with_suffix(".xlsx")
+    _write_xlsx(scores, xlsx_path)
+    print(f"\n✅ Artifacts: {output_path} · {html_path} · {xlsx_path}\n")
     print(report)
 
 
