@@ -15,16 +15,19 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
-      - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 26.5.1
     hooks:
-      - id: mypy
-        additional_dependencies:
-          - pydantic>=2.10
-          - pydantic-settings>=2.6
-          - langchain-core>=0.3
-          - langchain-openai>=0.2
-          - fastapi>=0.115
-          - types-requests
+      - id: black
+
+  # ty has no published pre-commit hook yet (astral-sh/ty#269), so run it
+  # locally via uv. Requires `uv sync --group dev` (done by `make setup`).
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty
+        entry: uv run ty check
+        language: system
+        types: [python]
+        pass_filenames: false

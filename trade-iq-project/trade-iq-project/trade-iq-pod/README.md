@@ -41,8 +41,8 @@ Key variables:
 
 ```bash
 make lint          # ruff check
-make format        # ruff format
-make type-check    # mypy strict
+make format        # black
+make type-check    # ty
 make test          # unit tests + coverage
 make audit         # pip-audit dependency scan
 make benchmark     # LLM benchmark (set RUNS=N)
