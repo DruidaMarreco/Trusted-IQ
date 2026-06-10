@@ -1,4 +1,5 @@
 """Unit tests for the sample tool."""
+
 from app.tools.sample_tool import sample_tool
 
 

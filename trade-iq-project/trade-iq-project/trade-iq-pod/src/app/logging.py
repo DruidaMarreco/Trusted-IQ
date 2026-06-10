@@ -1,4 +1,5 @@
 """Structured logging configuration with correlation IDs."""
+
 import logging
 import uuid
 from contextvars import ContextVar
@@ -21,9 +22,7 @@ def bind_request_id(request_id: str | None = None) -> str:
 def configure_logging() -> None:
     """Configure structlog — pretty console in dev, JSON in staging/prod."""
     renderer: structlog.types.Processor = (
-        structlog.dev.ConsoleRenderer()
-        if settings.env == "dev"
-        else structlog.processors.JSONRenderer()
+        structlog.dev.ConsoleRenderer() if settings.env == "dev" else structlog.processors.JSONRenderer()
     )
     structlog.configure(
         processors=[
@@ -32,8 +31,6 @@ def configure_logging() -> None:
             structlog.processors.TimeStamper(fmt="iso"),
             renderer,
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(
-            logging.getLevelName(settings.log_level)
-        ),
+        wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelName(settings.log_level)),
         cache_logger_on_first_use=True,
     )

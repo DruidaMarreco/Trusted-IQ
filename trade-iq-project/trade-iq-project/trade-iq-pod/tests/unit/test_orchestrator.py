@@ -1,4 +1,5 @@
 """Unit tests for the orchestrator agent."""
+
 import pytest
 
 from app.agents.orchestrator import OrchestratorAgent
