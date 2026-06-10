@@ -24,15 +24,36 @@ def build_llm(
     Args:
         model: Model name override. Falls back to ``cfg.llm_model``.
         provider: Provider override. Falls back to ``cfg.llm_provider``.
+            Ignored when a proxy is configured (see below).
         cfg: Settings instance. Defaults to the module-level singleton.
         **kwargs: Extra kwargs forwarded to ``init_chat_model``.
 
     Returns:
         A ``BaseChatModel`` instance ready for ``.invoke`` / ``.ainvoke``.
+
+    Notes:
+        If ``cfg.llm_proxy_base_url`` is set, every model is routed through that
+        single OpenAI-compatible endpoint (e.g. a LiteLLM proxy or enterprise
+        gateway), regardless of ``provider``. The proxy is expected to recognise
+        the given ``model`` name. This lets the benchmark compare many models
+        (GPT, Claude, Gemini, ...) behind one gateway.
     """
     cfg = cfg or _default_settings
     resolved_model = model or cfg.llm_model
     resolved_provider = provider or cfg.llm_provider
+
+    # Proxy mode: one OpenAI-compatible endpoint for all models.
+    if cfg.llm_proxy_base_url:
+        proxy_kwargs: dict[str, Any] = {
+            "base_url": cfg.llm_proxy_base_url,
+            "api_key": cfg.llm_proxy_api_key,
+        }
+        return init_chat_model(  # type: ignore[no-any-return]
+            resolved_model,
+            model_provider="openai",
+            **proxy_kwargs,
+            **kwargs,
+        )
 
     provider_kwargs: dict[str, Any] = {}
 
