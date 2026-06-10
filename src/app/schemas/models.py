@@ -13,6 +13,8 @@ class AgentRequest(BaseModel):
 class AgentResponse(BaseModel):
     """Response returned by the orchestrator agent."""
 
-    result: str = Field(..., description="Final agent output")
+    result: str = Field(..., description="Final grounded answer")
+    intent: str | None = Field(default=None, description="Classified intent")
+    tool: str | None = Field(default=None, description="Tool the orchestrator routed to, if any")
     session_id: str | None = Field(default=None)
     metadata: dict[str, object] = Field(default_factory=dict)
