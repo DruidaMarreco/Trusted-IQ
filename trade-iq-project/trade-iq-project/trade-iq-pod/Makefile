@@ -1,4 +1,4 @@
-.PHONY: setup install sync lock lint format type-check test test-integration audit all run benchmark
+.PHONY: setup install sync lock lint format type-check test test-integration audit all run evaluate
 
 setup:  ## First install + git hooks
 	python -m uv sync --group dev
@@ -37,7 +37,7 @@ audit:
 run:  ## Start FastAPI dev server
 	python -m uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-benchmark:  ## Run LLM benchmark (RUNS=3 by default)
-	python -m uv run python scripts/benchmark_models.py --runs $(or $(RUNS),3) --output results/benchmark.md
+evaluate:  ## Run TradeIQ model evaluation (intent accuracy + groundedness)
+	python -m uv run python scripts/evaluate_models.py --output results/model_eval.md
 
 all: lint type-check test
