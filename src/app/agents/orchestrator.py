@@ -12,6 +12,7 @@ wider agentic framework.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,6 +23,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.config import Settings
 from app.config import settings as _default_settings
 from app.eval import parse_intent_json
+from app.metrics import CallMetrics, TurnMetrics, estimate_cost
 from app.prompts import (
     INTENT_SYSTEM_PROMPT,
     INTENT_USER_TEMPLATE,
@@ -50,6 +52,7 @@ class OrchestratorResult:
     tool: str | None = None
     params: dict[str, Any] = field(default_factory=dict)
     tool_output: dict[str, Any] = field(default_factory=dict)
+    metrics: TurnMetrics = field(default_factory=TurnMetrics)
 
 
 class OrchestratorAgent:
@@ -59,9 +62,34 @@ class OrchestratorAgent:
         self._llm = llm
         self._cfg = cfg or _default_settings
 
-    async def _complete(self, system: str, user: str) -> str:
+    def _model_name(self) -> str:
+        return str(getattr(self._llm, "model", None) or getattr(self._llm, "model_name", None) or self._cfg.llm_model)
+
+    async def _complete(self, system: str, user: str) -> tuple[str, CallMetrics]:
+        start = time.perf_counter()
         response = await self._llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
-        return str(response.content)
+        latency_ms = round((time.perf_counter() - start) * 1000, 1)
+
+        usage = getattr(response, "usage_metadata", None)
+        input_tokens = int(usage.get("input_tokens", 0)) if isinstance(usage, dict) else 0
+        output_tokens = int(usage.get("output_tokens", 0)) if isinstance(usage, dict) else 0
+        model = self._model_name()
+        call = CallMetrics(
+            model=model,
+            latency_ms=latency_ms,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=round(estimate_cost(model, input_tokens, output_tokens), 6),
+        )
+        logger.info(
+            "llm_call",
+            model=model,
+            latency_ms=latency_ms,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=call.cost_usd,
+        )
+        return str(response.content), call
 
     async def run(
         self,
@@ -72,6 +100,7 @@ class OrchestratorAgent:
         planning_period: str = "",
     ) -> OrchestratorResult:
         """Run one turn: classify -> route -> ground."""
+        metrics = TurnMetrics()
         # 1. Classify intent.
         classify_user = INTENT_USER_TEMPLATE.format(
             query=query,
@@ -79,7 +108,8 @@ class OrchestratorAgent:
             account_scope=account_scope or "n/a",
             planning_period=planning_period or "n/a",
         )
-        raw = await self._complete(INTENT_SYSTEM_PROMPT, classify_user)
+        raw, classify_call = await self._complete(INTENT_SYSTEM_PROMPT, classify_user)
+        metrics.add(classify_call)
         data = parse_intent_json(raw)
         intent = str(data.get("intent", "")).strip().upper()
         confidence = float(data.get("confidence", 0.0) or 0.0)
@@ -91,10 +121,14 @@ class OrchestratorAgent:
         # 2a. Non-tool intents resolve immediately.
         if intent == "CLARIFICATION":
             question = str(data.get("clarifying_question") or DEFAULT_CLARIFY)
-            return OrchestratorResult(answer=question, intent="CLARIFICATION", confidence=confidence, params=params)
-        if intent not in INTENTS or intent == "OUT_OF_SCOPE":
+            logger.info("turn_complete", intent="CLARIFICATION", **metrics.as_dict())
             return OrchestratorResult(
-                answer=OUT_OF_SCOPE_REPLY, intent="OUT_OF_SCOPE", confidence=confidence, params=params
+                answer=question, intent="CLARIFICATION", confidence=confidence, params=params, metrics=metrics
+            )
+        if intent not in INTENTS or intent == "OUT_OF_SCOPE":
+            logger.info("turn_complete", intent="OUT_OF_SCOPE", **metrics.as_dict())
+            return OrchestratorResult(
+                answer=OUT_OF_SCOPE_REPLY, intent="OUT_OF_SCOPE", confidence=confidence, params=params, metrics=metrics
             )
 
         # 2b. Route to the tool for this intent.
@@ -111,7 +145,9 @@ class OrchestratorAgent:
             account_scope=account_scope or "n/a",
             planning_period=planning_period or "n/a",
         )
-        answer = await self._complete(RESPONSE_SYSTEM_PROMPT, respond_user)
+        answer, respond_call = await self._complete(RESPONSE_SYSTEM_PROMPT, respond_user)
+        metrics.add(respond_call)
+        logger.info("turn_complete", intent=intent, tool=tool_name, **metrics.as_dict())
         return OrchestratorResult(
             answer=answer,
             intent=intent,
@@ -119,4 +155,5 @@ class OrchestratorAgent:
             tool=tool_name,
             params=params,
             tool_output=tool_output,
+            metrics=metrics,
         )

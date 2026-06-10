@@ -24,6 +24,11 @@ async def test_data_query_routes_to_texttosql_and_grounds(make_llm: _LLM) -> Non
     assert result.tool == "text_to_sql_lookup"
     assert "142%" in result.answer
     assert result.tool_output["row_count"] >= 1
+    # metrics: two calls (classify + respond), with latency/tokens/cost tracked
+    assert result.metrics.calls == 2
+    assert result.metrics.input_tokens == 200
+    assert result.metrics.cost_usd > 0
+    assert result.metrics.latency_ms >= 0
 
 
 @pytest.mark.asyncio

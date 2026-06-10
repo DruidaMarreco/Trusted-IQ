@@ -32,5 +32,9 @@ async def invoke_agent(request: AgentRequest) -> AgentResponse:
         intent=result.intent,
         tool=result.tool,
         session_id=request.session_id,
-        metadata={"confidence": result.confidence, "params": result.params},
+        metadata={
+            "confidence": result.confidence,
+            "params": result.params,
+            "metrics": result.metrics.as_dict(),
+        },
     )

@@ -15,8 +15,9 @@ def make_llm() -> Callable[..., BaseChatModel]:
     contents in order (one per orchestration step). No network, no real LLM."""
 
     def _factory(*contents: str) -> BaseChatModel:
+        usage = {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150}
         llm = AsyncMock(spec=BaseChatModel)
-        llm.ainvoke = AsyncMock(side_effect=[SimpleNamespace(content=c) for c in contents])
+        llm.ainvoke = AsyncMock(side_effect=[SimpleNamespace(content=c, usage_metadata=usage) for c in contents])
         return cast(BaseChatModel, llm)
 
     return _factory
