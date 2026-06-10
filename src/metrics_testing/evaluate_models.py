@@ -480,7 +480,13 @@ async def run_evaluation(intent_sample: int, output_path: Path, backend: str) ->
 
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     dataset: list[dict[str, str]] = json.loads(INTENT_DATASET_PATH.read_text(encoding="utf-8"))
-    intent_cases = dataset[:intent_sample] if intent_sample > 0 else dataset
+    # The dataset is grouped by intent, so stride-sample to span all intents
+    # even for a small --intent-sample.
+    if intent_sample > 0:
+        stride = max(1, len(dataset) // intent_sample)
+        intent_cases = dataset[::stride][:intent_sample]
+    else:
+        intent_cases = dataset
     print(f"Intent cases: {len(intent_cases)} | Grounded cases: {len(GROUNDED_CASES)} | backend: {backend}")
 
     if backend == "claude_code":
