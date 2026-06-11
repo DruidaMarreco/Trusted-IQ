@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Copilot proxy provider** (`LLM_PROVIDER=copilot`): talks to a local Anthropic-style gateway (`/v1/messages`, `x-api-key`, e.g. a LiteLLM/copilot proxy on `localhost:4000`) via `ChatAnthropic` with a custom `base_url`. New `--backend copilot` runs `COPILOT_MODELS` through the proxy and auto-skips any it doesn't serve. Config: `COPILOT_PROXY_BASE_URL` / `COPILOT_PROXY_API_KEY`.
 - **Google Gemini provider** (`LLM_PROVIDER=google`) + a cross-vendor **test matrix** (`MODEL_MATRIX`: OpenAI/Anthropic/Google × cheap/medium/strong). New eval backends `--backend google` and `--backend matrix` run whatever is reachable and **auto-skip** unavailable models (undeployed Azure / missing Google key). Anthropic tier runs today via the subscription quota; OpenAI (gpt-5.x) awaits Foundry deployment; Gemini awaits `GOOGLE_API_KEY`.
 - **Azure AI Foundry provider** (`LLM_PROVIDER=azure`): calls the Foundry OpenAI-compatible endpoint (`{endpoint}/openai/v1`) by deployment name — any deployed model works by name, "all models open". Thin orchestrator verified end-to-end on `gpt-4o`.
 - **Native tool-calling orchestrator** (`ToolCallingOrchestrator`): provider-agnostic model-driven tool use via LangChain `bind_tools` (Azure/OpenAI/Anthropic API); 4/4 tool-selection on Azure `gpt-4o`

@@ -75,6 +75,19 @@ AZURE_MODELS = [
 ]
 # Google Gemini deployments (Google API, not Azure Foundry).
 GOOGLE_MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
+# Models served via the Copilot proxy (Anthropic-style gateway, e.g. localhost:4000).
+# Names use the proxy's spelling (e.g. dotted versions); the eval auto-skips any
+# the proxy doesn't serve, so this list can be broad.
+COPILOT_MODELS = [
+    "claude-sonnet-4.6",
+    "claude-haiku-4.5",
+    "claude-opus-4.1",
+    "gpt-4o",
+    "gpt-4.1",
+    "gpt-5",
+    "o4-mini",
+    "gemini-2.5-pro",
+]
 
 # Cross-vendor test matrix: (vendor, tier, backend, model). Each model routes to
 # its own backend; `--backend matrix` runs whatever is reachable and auto-skips
@@ -951,6 +964,13 @@ async def run_evaluation(
             return
         entries = [(m, "google", build_llm(model=m, provider="google")) for m in live_g]
         judge = build_llm(model=live_g[0], provider="google")
+    elif backend == "copilot":
+        live_c = [m for m in COPILOT_MODELS if await _reachable("copilot", m)]
+        if not live_c:
+            print("No Copilot-proxy models reachable (is the proxy running on the configured URL?) — aborting.")
+            return
+        entries = [(m, "copilot", build_llm(model=m, provider="copilot")) for m in live_c]
+        judge = build_llm(model=live_c[0], provider="copilot")
     elif backend == "matrix":
         reachable = await _resolve_matrix()
         if not reachable:
@@ -988,6 +1008,11 @@ async def run_evaluation(
         )
     elif backend == "google":
         scope = f"Google Gemini ({names})." + ts_note
+    elif backend == "copilot":
+        scope = (
+            f"Copilot proxy, Anthropic-style gateway ({names}). Models the proxy "
+            "doesn't serve were auto-skipped." + ts_note
+        )
     elif backend == "matrix":
         scope = (
             f"Cross-vendor matrix ({names}). Unreachable models (undeployed / no API key) "
@@ -1023,7 +1048,9 @@ def main() -> None:
     parser.add_argument("--intent-sample", type=int, default=24, help="Number of intent cases to test (0 = all)")
     parser.add_argument("--output", type=Path, default=Path("results/model_eval.md"), help="Output markdown file")
     parser.add_argument(
-        "--backend", choices=["claude_code", "azure", "google", "providers", "matrix"], default="claude_code"
+        "--backend",
+        choices=["claude_code", "azure", "google", "copilot", "providers", "matrix"],
+        default="claude_code",
     )
     parser.add_argument(
         "--tool-selection-sample",
