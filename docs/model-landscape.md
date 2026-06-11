@@ -29,9 +29,32 @@ figures). The empirical comparison and the pinned choice live in
 
 - **Pinned now:** `LLM_MODEL=claude-opus-4-8` (top composite), Haiku fallback —
   see [model-evaluation.md](model-evaluation.md#results).
-- **Evaluated so far:** Claude only (subscription quota). GPT and Gemini require
-  metered API keys via `--backend providers`; the harness is ready for them
-  (extend `PROVIDER_MODELS`, add a `google_genai` branch to `build_llm`, and
-  prices in `app/metrics.py`).
 - **Provider-agnostic by design:** swapping families is an `.env` change
   (`LLM_PROVIDER` / `LLM_MODEL`) — see [ADR-0002](adr/0002-langchain-provider-agnostic-factory.md).
+
+## Test matrix (prepared for future runs)
+
+The candidate set for upcoming comparisons (`MODEL_MATRIX` in
+`evaluate_models.py`). Each model routes to its own backend; `--backend matrix`
+runs whatever is reachable and **auto-skips the rest**.
+
+| Vendor | Cheap | Medium | Strong | Backend | Ready? |
+|--------|-------|--------|--------|---------|--------|
+| **OpenAI** | `gpt-5.4-mini` | `gpt-5.4` | `gpt-5.5` | `azure` (Foundry deployment) | ⏳ must be **deployed** in Foundry (only `gpt-4o` is today) |
+| **Anthropic** | `claude-haiku-4-5` | `claude-sonnet-4-6` | `claude-opus-4-8` | `claude_code` (subscription) | ✅ **ready now** (aliases `haiku`/`sonnet`/`opus`) |
+| **Google** | `gemini-2.5-flash-lite` | `gemini-2.5-flash` | `gemini-2.5-pro` | `google` (Gemini API) | ⏳ needs `GOOGLE_API_KEY` (not in Azure Foundry) |
+
+To run the full matrix once everything is available:
+
+```bash
+uv run python src/metrics_testing/evaluate_models.py --backend matrix
+```
+
+To light up the pending tiers:
+- **OpenAI:** deploy `gpt-5.4-mini` / `gpt-5.4` / `gpt-5.5` in the Foundry portal
+  (the deployment name must match, or edit `AZURE_MODELS` / `MODEL_MATRIX`).
+- **Google:** set `GOOGLE_API_KEY` in `.env`.
+- **Anthropic:** already works via the Claude Code subscription quota.
+
+Prices for cost estimation are in `app/metrics.py` (approximate for the new
+models; refine when published).
