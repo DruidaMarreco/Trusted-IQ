@@ -41,18 +41,20 @@ user query →│  Intent Classifier  │  (PROMPT-001)
   numbers. This is what the model evaluation measures.
 - Canonical prompts live in [src/app/prompts.py](src/app/prompts.py).
 
-### Two orchestrators
+### Orchestrators
 
-The service ships two orchestrators that differ in **who decides which tool to
+The service ships three orchestrators that differ in **who decides which tool to
 use** — see [docs/orchestration.md](docs/orchestration.md):
 
 - **Thin orchestrator** (`OrchestratorAgent`, **production**) — deterministic:
   the LLM classifies intent, then code routes to the tool. Provider-agnostic,
   fully testable; measures **intent-classification accuracy**.
-- **Agentic orchestrator** (`AgenticOrchestrator`) — model-driven: Claude is
-  given the tools and *decides* whether/which to call (native tool use via the
-  Claude Agent SDK, on the subscription quota). Measures **tool-selection
-  accuracy** (latest: 6/6 on Sonnet).
+- **Agentic orchestrator** (`AgenticOrchestrator`) — model-driven via the Claude
+  Agent SDK (subscription quota): Claude *decides* whether/which tool to call.
+  Tool-selection: 6/6 on Sonnet.
+- **Native tool-calling** (`ToolCallingOrchestrator`) — provider-agnostic
+  model-driven tool use via LangChain `bind_tools`; the agentic path for the
+  **Azure**-based deployment. Tool-selection: 4/4 on Azure `gpt-4o`.
 
 Tools (CDT TextToSQL, ERDC Optimizer) call their **live** service over HTTP when
 configured, and fall back to deterministic **mock** output otherwise — see
@@ -67,7 +69,7 @@ configured, and fall back to deterministic **mock** output otherwise — see
 ├── docs/               architecture, testing, model-evaluation, ADRs, diagrams
 └── src/                all code and tests
     ├── app/                  the service
-    │   ├── agents/           orchestrator.py (thin) · agentic_orchestrator.py (model-driven)
+    │   ├── agents/           orchestrator.py (thin) · agentic_orchestrator.py (Claude SDK) · tool_calling_orchestrator.py (bind_tools)
     │   ├── tools/            CDT/ERDC integrations — registry · cdt · erdc · http · mock
     │   ├── api/routes.py     /agent/invoke
     │   ├── prompts.py · llm_factory.py · claude_code_llm.py · metrics.py · eval.py · config.py
@@ -128,8 +130,8 @@ Copy `.env.example` to `.env`. Key variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `LLM_PROVIDER` | `azure_openai` | `azure_openai` \| `openai` \| `anthropic` \| `claude_code` \| `ollama` |
-| `LLM_MODEL` | `claude-opus-4-8` | Orchestrator model (pinned by the model evaluation) |
+| `LLM_PROVIDER` | `azure_openai` | `azure` (Azure AI Foundry, OpenAI-compatible) \| `azure_openai` \| `openai` \| `anthropic` \| `claude_code` \| `ollama` |
+| `LLM_MODEL` | `claude-opus-4-8` | Orchestrator model / Foundry **deployment name** (e.g. `gpt-4o`) — any deployed model works by name |
 | `LLM_PROXY_BASE_URL` | _(empty)_ | If set, route all models through one OpenAI-compatible gateway |
 | `CDT_BASE_URL` / `ERDC_BASE_URL` | _(empty)_ | Tool service URLs; **empty = deterministic mock**, set = live HTTP (see [docs/tools.md](docs/tools.md)) |
 | `ENV` / `LOG_LEVEL` | `dev` / `INFO` | Runtime + logging |

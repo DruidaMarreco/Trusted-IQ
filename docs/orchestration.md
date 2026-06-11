@@ -1,20 +1,24 @@
-# Orchestration — thin (deterministic) vs agentic (model-driven)
+# Orchestration — deterministic vs model-driven
 
-The assistant ships **two orchestrators**. Both take a user query and return a
+The assistant ships **three orchestrators**. All take a user query and return a
 grounded answer using the right backend tool; they differ in **who decides which
-tool to use**. We keep both because that decision is exactly what we want to
-measure — two different ways.
+tool to use** (and how). We keep them because that decision is exactly what we
+want to measure — and because the agentic path differs per provider.
 
-| | Thin orchestrator | Agentic orchestrator |
-|---|---|---|
-| Class | `OrchestratorAgent` | `AgenticOrchestrator` |
-| File | [`agents/orchestrator.py`](../src/app/agents/orchestrator.py) | [`agents/agentic_orchestrator.py`](../src/app/agents/agentic_orchestrator.py) |
-| Tool decision | **Deterministic** Python router on the classified intent | **Model-driven** — Claude decides whether/which tool to call |
-| LLM mechanism | 2 plain calls: classify (PROMPT-001), then ground (PROMPT-002) | Claude Agent SDK native tool-use loop |
-| Tools exposed to the model? | No — the model only classifies | Yes — CDT/ERDC as in-process MCP tools |
-| Backend | any provider (provider-uniform) | Claude Agent SDK (Claude Code subscription quota) |
-| Measures | **intent-classification accuracy** | **tool-selection accuracy** |
-| Role | **production** path (`POST /agent/invoke`) | capability test / future agentic features |
+| | Thin orchestrator | Agentic (Claude Agent SDK) | Native tool-calling |
+|---|---|---|---|
+| Class | `OrchestratorAgent` | `AgenticOrchestrator` | `ToolCallingOrchestrator` |
+| File | [`orchestrator.py`](../src/app/agents/orchestrator.py) | [`agentic_orchestrator.py`](../src/app/agents/agentic_orchestrator.py) | [`tool_calling_orchestrator.py`](../src/app/agents/tool_calling_orchestrator.py) |
+| Tool decision | **Deterministic** router on the classified intent | **Model-driven** (Claude decides) | **Model-driven** (model decides) |
+| LLM mechanism | 2 plain calls (classify, then ground) | Claude Agent SDK tool-use loop | LangChain `bind_tools` (OpenAI-style function calling) |
+| Backend | any provider (uniform) | Claude Agent SDK (subscription quota) | any tool-capable provider — **Azure**/OpenAI/Anthropic API |
+| Measures | **intent-classification accuracy** | **tool-selection accuracy** | **tool-selection accuracy** |
+| Role | **production** path (`/agent/invoke`) | tool-use test (Claude, no key) | tool-use on the **Azure-based** deployment |
+
+The two agentic orchestrators are equivalent in purpose; which one applies
+depends on the backend — `AgenticOrchestrator` for Claude Code (subscription
+quota), `ToolCallingOrchestrator` for Azure and other API providers (native
+function calling). The eval picks the right one per backend automatically.
 
 ---
 
@@ -76,6 +80,31 @@ async for message in query(prompt=user_query, options=options):
 the SDK's built-in `ToolSearch` discovery step, which surfaces the deferred MCP
 tools but is not a domain decision). The same in-process tools call the live or
 mock CDT/ERDC backend, so this path benefits from the [tool layer](tools.md) too.
+
+---
+
+## 2b. Native tool-calling orchestrator (Azure / OpenAI)
+
+`ToolCallingOrchestrator` is the **provider-agnostic** model-driven path used by
+the Azure-based deployment. It gives the model the CDT/ERDC tools via LangChain
+`bind_tools` (OpenAI-style function calling) and runs a tool-use loop: invoke →
+if the model emitted `tool_calls`, execute them, feed `ToolMessage`s back, repeat
+until a final answer. It works with **any tool-capable chat model** — Azure AI
+Foundry (gpt-4o, …), OpenAI, Anthropic API — so it's the agentic counterpart to
+`AgenticOrchestrator` (which is Claude Agent SDK only). It is **not** used for the
+`claude_code` backend (`ChatClaudeCode` doesn't expose `bind_tools`).
+
+```python
+llm_with_tools = llm.bind_tools([text_to_sql_lookup, optimizer_run])
+response = await llm_with_tools.ainvoke(messages)
+for call in response.tool_calls:            # the model's autonomous choice
+    output = await tool_map[call["name"]].ainvoke(call["args"])
+    messages.append(ToolMessage(content=output, tool_call_id=call["id"]))
+```
+
+**Verified on Azure `gpt-4o`: 4/4 tool-selection** (calls text_to_sql_lookup /
+optimizer_run when it has enough, abstains for vague / off-topic), grounded in
+the tool output — at ~2s/turn.
 
 ---
 

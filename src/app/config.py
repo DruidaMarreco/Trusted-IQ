@@ -18,7 +18,9 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", description="Logging level")
 
     # --- Provider selection ---
-    llm_provider: str = "azure_openai"  # azure_openai | openai | anthropic | claude_code | ollama
+    # azure = Azure AI Foundry (OpenAI-compatible /openai/v1, call by deployment name)
+    # azure_openai = classic Azure OpenAI (deployment-based); also: openai | anthropic | claude_code | ollama
+    llm_provider: str = "azure_openai"
     # Orchestrator model — selected by the model evaluation (results/model_eval.*):
     # Claude Opus 4.8 ranked #1 (composite 0.955; 100% intent accuracy, top
     # groundedness). Pair with LLM_PROVIDER=claude_code (dev/test, subscription

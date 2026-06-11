@@ -119,7 +119,11 @@ in the tool output).
 `build_llm()` ([llm_factory.py](../src/app/llm_factory.py)) selects the backend
 at runtime:
 
-- Native providers (`azure_openai`, `openai`, `anthropic`, `ollama`)
+- **`azure`** — Azure AI Foundry via its OpenAI-compatible endpoint
+  (`{endpoint}/openai/v1`), addressed by **deployment name**. Any model deployed
+  in the Foundry resource is callable by name with no code change ("all models
+  open"). This is the production-target provider.
+- Native providers (`azure_openai` classic, `openai`, `anthropic`, `ollama`)
 - `claude_code` — runs through Claude Code on the subscription quota
   ([claude_code_llm.py](../src/app/claude_code_llm.py))
 - A unified **OpenAI-compatible proxy** when `LLM_PROXY_BASE_URL` is set (all
@@ -155,7 +159,8 @@ extracted params and per-turn usage `metrics` (latency, tokens, estimated cost).
 | `claude_code_llm.py` | `ChatClaudeCode` — LangChain model backed by the Claude Agent SDK (subscription quota) |
 | `prompts.py` | Canonical PROMPT-001 (intent) and PROMPT-002 (response) |
 | `agents/orchestrator.py` | `OrchestratorAgent` — the thin orchestrator (classify → route → ground) |
-| `agents/agentic_orchestrator.py` | `AgenticOrchestrator` — model-driven tool use via the Agent SDK |
+| `agents/agentic_orchestrator.py` | `AgenticOrchestrator` — model-driven tool use via the Claude Agent SDK (subscription quota) |
+| `agents/tool_calling_orchestrator.py` | `ToolCallingOrchestrator` — provider-agnostic model-driven tool use via LangChain `bind_tools` (Azure/OpenAI/Anthropic API) |
 | `tools/` | CDT TextToSQL + ERDC Optimizer integrations — `registry.py` (routing), `cdt.py`/`erdc.py` (live-or-mock), `http.py` (async client + `ToolError`), `mock.py` (synthetic data) |
 | `eval.py` | Pure helpers: intent parsing + groundedness figure-overlap |
 | `metrics.py` | `estimate_cost`, `CallMetrics`, `TurnMetrics` — per-call/per-turn usage tracking |
