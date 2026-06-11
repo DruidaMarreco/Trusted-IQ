@@ -74,6 +74,21 @@ def build_llm(
             **kwargs,
         )
 
+    # Copilot proxy: a local Anthropic-style gateway (/v1/messages, x-api-key),
+    # e.g. a LiteLLM/copilot proxy fronting many models. Uses the Anthropic client
+    # pointed at the proxy's base URL, so any model the proxy serves works by name.
+    if resolved_provider == "copilot":
+        copilot_kwargs: dict[str, Any] = {
+            "base_url": cfg.copilot_proxy_base_url,
+            "api_key": cfg.copilot_proxy_api_key.get_secret_value(),
+        }
+        return init_chat_model(  # type: ignore[no-any-return]
+            resolved_model,
+            model_provider="anthropic",
+            **copilot_kwargs,
+            **kwargs,
+        )
+
     # Proxy mode: one OpenAI-compatible endpoint for all models.
     if cfg.llm_proxy_base_url:
         proxy_kwargs: dict[str, Any] = {

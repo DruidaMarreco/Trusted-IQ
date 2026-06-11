@@ -66,6 +66,7 @@ cumulative history — all under `results/` (gitignored):
 | `claude_code` (default) | Claude Opus / Sonnet / Haiku | Claude Code subscription quota — local CLI session, or `CLAUDE_CODE_OAUTH_TOKEN` in CI (keep `ANTHROPIC_API_KEY` unset) |
 | `azure` | Azure AI Foundry deployments (`AZURE_MODELS`; **auto-skips undeployed**) | `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` |
 | `google` | Gemini (`GOOGLE_MODELS`) | `GOOGLE_API_KEY` |
+| `copilot` | Models behind a local Anthropic-style proxy (`COPILOT_MODELS`; **auto-skips unserved**) | `COPILOT_PROXY_BASE_URL` (default `localhost:4000`) + `COPILOT_PROXY_API_KEY` |
 | `providers` | GPT-4o, Claude Sonnet (extend in `PROVIDER_MODELS`) | Provider API keys |
 | `matrix` | The cross-vendor `MODEL_MATRIX` (OpenAI/Anthropic/Google × cheap/medium/strong); **auto-skips unreachable** | per-model (Azure / subscription / Google key) |
 

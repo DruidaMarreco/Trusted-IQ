@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     # --- Google Gemini (not served via Azure Foundry) ---
     google_api_key: SecretStr = SecretStr("")
 
+    # --- Copilot proxy (local Anthropic-style gateway: /v1/messages, x-api-key) ---
+    # e.g. a LiteLLM/copilot proxy on localhost:4000 that fronts many models.
+    copilot_proxy_base_url: str = "http://localhost:4000"
+    copilot_proxy_api_key: SecretStr = SecretStr("sk-dummy")
+
     # --- Anthropic ---
     anthropic_api_key: SecretStr = SecretStr("")
 
