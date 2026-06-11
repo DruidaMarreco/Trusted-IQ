@@ -17,9 +17,11 @@ make test          # pytest + coverage (config in pyproject [tool.pytest])
   relaxed in CI (`--cov-fail-under=0`) until the suite grows.
 - Ground-truth data shared with the metrics tier lives in `src/tests/data/`.
 
-Current coverage: the pure helpers (`eval.py`), the tool integrations (`app/tools/` —
-CDT/ERDC live HTTP path, mock fallback, routing and error handling), the LLM
-factory routing and the orchestrator.
+Current coverage (**33 tests, all green**): the pure helpers (`eval.py`), the
+tool integrations (`app/tools/` — CDT/ERDC live HTTP path, mock fallback, routing
+and error handling), the LLM-factory routing, the Claude Code model, the
+orchestrator, the `/agent/invoke` route, the usage `metrics`, and the agentic
+orchestrator's pure helpers (model coercion, tool-name filtering).
 
 ## 2. Integration testing — `src/integration_testing/test.py`
 
@@ -46,16 +48,30 @@ make integration   # uv run python src/integration_testing/test.py
   `tool_stubs.py` implements the `/query` and `/optimise` contracts with
   distinctive figures, so a live call is obvious in the grounded answer.
 
+### Agentic tool-selection test — `src/integration_testing/agentic_tool_test.py`
+
+Exercises the **agentic** orchestrator (`AgenticOrchestrator`): Claude is given
+the tools and decides which to call. Each scenario's chosen tool is checked
+against the expected one, reporting **tool-selection accuracy**.
+
+```bash
+AGENTIC_MODEL=sonnet uv run python src/integration_testing/agentic_tool_test.py
+```
+
+Latest result (Sonnet): **6/6 (100%)**. See [orchestration.md](orchestration.md#3-tool-selection-test--result).
+
 ## 3. Metrics testing — `src/metrics_testing/`
 
 Mass model-quality evaluation that runs the full assistant flow for each
 candidate model and produces a comparison report (markdown **and HTML**).
 
 ```bash
-make evaluate      # → results/model_eval.md + results/model_eval.html
+make evaluate      # → timestamped + _latest .md / .html / .xlsx / .json in results/
 ```
 
-Scores each model on intent accuracy, groundedness, relevance and format. See
+Scores each model on intent accuracy, groundedness, relevance and format, and
+emits per-round artifacts (HTML report with confusion matrix + chart, XLSX with
+5 sheets, JSON, and a cross-round history CSV). See
 [model-evaluation.md](model-evaluation.md). Wired into the disabled
 `metrics.yml` workflow for scheduled/manual cloud runs.
 
