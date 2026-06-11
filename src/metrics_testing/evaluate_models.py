@@ -70,6 +70,18 @@ GROUNDED_CASES: list[dict[str, Any]] = [
     {"query": "Give me options for a £40k budget.", "intent": "OPTIMIZER_RUN", "params": {"budget_remaining": 40000}},
 ]
 
+# Agentic tool-selection cases — does the model itself choose the right tool?
+# expected = the tool it should call, or None when it should call no tool
+# (clarify / decline). Only run on the claude_code backend (Agent SDK).
+TOOL_SELECTION_CASES: list[dict[str, Any]] = [
+    {"query": "Why did you recommend the Easter display for Tesco?", "expected": "text_to_sql_lookup"},
+    {"query": "List my top performing promos for Carrefour last quarter.", "expected": "text_to_sql_lookup"},
+    {"query": "What are the best promo options for my remaining £80k budget at Tesco?", "expected": "optimizer_run"},
+    {"query": "Re-optimise my Aldi plan to hit a 1.5x uplift guideline.", "expected": "optimizer_run"},
+    {"query": "Show me the options.", "expected": None},
+    {"query": "What's the weather in London today?", "expected": None},
+]
+
 JUDGE_PROMPT = """You are evaluating a TradeIQ Sales Assistant answer for a CPG commercial team.
 
 The tool output below is the ONLY source of facts the answer may use:
@@ -142,6 +154,19 @@ class ResponseRecord:
 
 
 @dataclass
+class ToolSelectionRecord:
+    """One agentic tool-selection question: which tool the model chose itself."""
+
+    model: str
+    query: str
+    expected: str  # tool name, or "(no tool)"
+    chose: str  # comma-joined tool names, or "(none)"
+    correct: bool
+    latency_ms: float
+    cost_usd: float
+
+
+@dataclass
 class ModelScore:
     name: str
     intent_correct: int = 0
@@ -155,13 +180,21 @@ class ModelScore:
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    # Agentic tool-selection (claude_code backend only; may be 0/0 = not run).
+    tool_selection_correct: int = 0
+    tool_selection_total: int = 0
     # Per-question records for the data artifacts.
     intent_records: list[IntentRecord] = field(default_factory=list)
     response_records: list[ResponseRecord] = field(default_factory=list)
+    tool_selection_records: list[ToolSelectionRecord] = field(default_factory=list)
 
     @property
     def intent_accuracy(self) -> float:
         return self.intent_correct / self.intent_total if self.intent_total else 0.0
+
+    @property
+    def tool_selection_accuracy(self) -> float:
+        return self.tool_selection_correct / self.tool_selection_total if self.tool_selection_total else 0.0
 
     @staticmethod
     def _avg(xs: list[float]) -> float:
@@ -315,6 +348,47 @@ async def _evaluate_model(
     return score
 
 
+async def _evaluate_tool_selection(
+    name: str, cases: list[dict[str, Any]]
+) -> tuple[int, int, list[ToolSelectionRecord]]:
+    """Run the AGENTIC orchestrator over labelled cases — does the model pick the
+    right tool itself? Claude Agent SDK only (claude_code backend)."""
+    from app.agents.agentic_orchestrator import AgenticOrchestrator
+
+    agent = AgenticOrchestrator(model=name, cfg=_EVAL_CFG)  # mock tools — we score the choice, not the data
+    correct = 0
+    records: list[ToolSelectionRecord] = []
+    for case in cases:
+        expected = case["expected"]
+        try:
+            result = await agent.run(str(case["query"]))
+        except Exception as exc:
+            print(f"  tool-selection ERROR ({str(case['query'])[:40]}): {exc}")
+            continue
+        chose = result.tool_names
+        ok = len(chose) == 0 if expected is None else expected in chose
+        correct += ok
+        records.append(
+            ToolSelectionRecord(
+                model=name,
+                query=str(case["query"]),
+                expected=str(expected) if expected else "(no tool)",
+                chose=", ".join(chose) or "(none)",
+                correct=bool(ok),
+                latency_ms=result.metrics.latency_ms,
+                cost_usd=result.metrics.cost_usd,
+            )
+        )
+    total = len(records)
+    print(f"  tool-selection accuracy: {correct}/{total}" + (f" ({correct / total * 100:.0f}%)" if total else ""))
+    return correct, total, records
+
+
+def _fmt_tool_selection(s: ModelScore) -> str:
+    """Tool-selection accuracy as a percentage, or 'n/a' when it wasn't run."""
+    return f"{s.tool_selection_accuracy * 100:.0f}%" if s.tool_selection_total else "n/a"
+
+
 def _render_report(scores: list[ModelScore], intent_n: int, timestamp: str, scope: str) -> str:
     lines = [
         "# TradeIQ TPO — Model Evaluation",
@@ -323,15 +397,17 @@ def _render_report(scores: list[ModelScore], intent_n: int, timestamp: str, scop
         "",
         f"_{scope}_",
         "",
-        "| Model | Intent acc. | Groundedness /5 | Figure overlap | Relevance /5 | Format /5 "
+        "| Model | Intent acc. | Tool sel. | Groundedness /5 | Figure overlap | Relevance /5 | Format /5 "
         "| Avg latency (ms) | Cost (USD) | Tokens | Value | Composite |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for s in sorted(scores, key=lambda x: -x.composite):
         lines.append(
-            f"| **{s.name}** | {s.intent_accuracy * 100:.1f}% | {s._avg(s.groundedness):.1f} "
-            f"| {s._avg(s.figure_overlap) * 100:.0f}% | {s._avg(s.relevance):.1f} | {s._avg(s.fmt):.1f} "
-            f"| {s.avg_latency_ms:.0f} | ${s.cost_usd:.4f} | {s.total_tokens} | {s.value_index} | {s.composite:.3f} |"
+            f"| **{s.name}** | {s.intent_accuracy * 100:.1f}% | {_fmt_tool_selection(s)} "
+            f"| {s._avg(s.groundedness):.1f} | {s._avg(s.figure_overlap) * 100:.0f}% "
+            f"| {s._avg(s.relevance):.1f} | {s._avg(s.fmt):.1f} "
+            f"| {s.avg_latency_ms:.0f} | ${s.cost_usd:.4f} | {s.total_tokens} "
+            f"| {s.value_index} | {s.composite:.3f} |"
         )
     if scores:
         best = max(scores, key=lambda x: x.composite)
@@ -382,7 +458,8 @@ def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str, scope:
     summary = "".join(
         f'<tr class="{"best" if s.name == best.name else ""}">'
         f'<td class="l">{html.escape(s.name)}</td>'
-        f"<td>{s.intent_accuracy * 100:.1f}%</td><td>{s._avg(s.groundedness):.1f}</td>"
+        f"<td>{s.intent_accuracy * 100:.1f}%</td><td>{_fmt_tool_selection(s)}</td>"
+        f"<td>{s._avg(s.groundedness):.1f}</td>"
         f"<td>{s._avg(s.figure_overlap) * 100:.0f}%</td><td>{s._avg(s.relevance):.1f}</td>"
         f"<td>{s._avg(s.fmt):.1f}</td><td>{s.avg_latency_ms:.0f}</td><td>${s.cost_usd:.4f}</td>"
         f"<td>{s.total_tokens}</td><td>{s.value_index}</td><td><strong>{s.composite:.3f}</strong></td></tr>"
@@ -404,6 +481,14 @@ def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str, scope:
         for s in ranked
         for rec in s.response_records
     )
+    tool_selection_rows = "".join(
+        f'<tr class="{"" if rec.correct else "bad"}"><td class="l">{html.escape(rec.model)}</td>'
+        f'<td class="l">{html.escape(rec.query)}</td><td>{html.escape(rec.expected)}</td>'
+        f"<td>{html.escape(rec.chose)}</td><td>{'PASS' if rec.correct else 'FAIL'}</td>"
+        f"<td>{rec.latency_ms:.0f}</td></tr>"
+        for s in ranked
+        for rec in s.tool_selection_records
+    )
 
     labels, matrix, per_intent = _confusion(scores)
     conf_head = "".join(f"<th>{p}</th>" for p in labels)
@@ -419,6 +504,17 @@ def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str, scope:
             f'<tr><td class="l">{expected}</td>{cells}<td>{(correct / total * 100) if total else 0:.0f}%</td></tr>'
         )
 
+    tool_selection_section = (
+        (
+            "<h2>Agentic tool selection — per question (the model decides the tool)</h2>"
+            '<table><thead><tr><th class="l">Model</th><th class="l">Question</th><th>Expected</th>'
+            "<th>Chose</th><th>Result</th><th>Latency (ms)</th></tr></thead>"
+            f"<tbody>{tool_selection_rows}</tbody></table>"
+        )
+        if tool_selection_rows
+        else ""
+    )
+
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>TradeIQ TPO — Model Evaluation</title>
@@ -431,7 +527,7 @@ def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str, scope:
 <h2>Composite score</h2>
 {_svg_bars(ranked)}
 <h2>Summary</h2>
-<table><thead><tr><th class="l">Model</th><th>Intent acc.</th><th>Groundedness /5</th>
+<table><thead><tr><th class="l">Model</th><th>Intent acc.</th><th>Tool sel.</th><th>Groundedness /5</th>
 <th>Figure overlap</th><th>Relevance /5</th><th>Format /5</th><th>Avg latency (ms)</th>
 <th>Cost (USD)</th><th>Tokens</th><th>Value</th><th>Composite</th></tr></thead>
 <tbody>{summary}</tbody></table>
@@ -447,8 +543,10 @@ def _render_html(scores: list[ModelScore], intent_n: int, timestamp: str, scope:
 <th>Grounded /5</th><th>Relevance /5</th><th>Format /5</th><th>Figure overlap</th>
 <th class="l">Answer</th><th class="l">Tool output</th></tr></thead>
 <tbody>{response_rows}</tbody></table>
+{tool_selection_section}
 <p><small>Value = composite quality per US dollar of estimated cost. Groundedness = answer uses only tool
-output (LLM judge + figure-overlap check). Claude Code usage is subscription-quota billed.</small></p>
+output (LLM judge + figure-overlap check). Tool selection = the agentic orchestrator (Claude Agent SDK)
+deciding the tool itself. Claude Code usage is subscription-quota billed.</small></p>
 </body></html>
 """
 
@@ -457,6 +555,7 @@ _HISTORY_HEADER = [
     "timestamp",
     "model",
     "intent_acc",
+    "tool_selection_acc",
     "groundedness",
     "relevance",
     "format",
@@ -481,6 +580,7 @@ def _append_history(scores: list[ModelScore], timestamp: str, path: Path) -> lis
                     timestamp,
                     s.name,
                     round(s.intent_accuracy * 100, 1),
+                    round(s.tool_selection_accuracy * 100, 0) if s.tool_selection_total else "",
                     round(s._avg(s.groundedness), 2),
                     round(s._avg(s.relevance), 2),
                     round(s._avg(s.fmt), 2),
@@ -506,6 +606,7 @@ def _export_json(scores: list[ModelScore], intent_n: int, timestamp: str, backen
             {
                 "model": s.name,
                 "intent_accuracy": round(s.intent_accuracy, 4),
+                "tool_selection_accuracy": (round(s.tool_selection_accuracy, 4) if s.tool_selection_total else None),
                 "groundedness": round(s._avg(s.groundedness), 3),
                 "relevance": round(s._avg(s.relevance), 3),
                 "format": round(s._avg(s.fmt), 3),
@@ -518,6 +619,7 @@ def _export_json(scores: list[ModelScore], intent_n: int, timestamp: str, backen
                 "composite": round(s.composite, 4),
                 "intent_records": [asdict(r) for r in s.intent_records],
                 "response_records": [asdict(r) for r in s.response_records],
+                "tool_selection_records": [asdict(r) for r in s.tool_selection_records],
             }
             for s in scores
         ],
@@ -561,6 +663,7 @@ def _write_xlsx(scores: list[ModelScore], path: Path, history_rows: list[list[st
         [
             "Model",
             "Intent acc %",
+            "Tool sel %",
             "Groundedness /5",
             "Figure overlap %",
             "Relevance /5",
@@ -576,6 +679,7 @@ def _write_xlsx(scores: list[ModelScore], path: Path, history_rows: list[list[st
             [
                 s.name,
                 round(s.intent_accuracy * 100, 1),
+                round(s.tool_selection_accuracy * 100, 0) if s.tool_selection_total else "n/a",
                 round(s._avg(s.groundedness), 2),
                 round(s._avg(s.figure_overlap) * 100, 0),
                 round(s._avg(s.relevance), 2),
@@ -672,6 +776,26 @@ def _write_xlsx(scores: list[ModelScore], path: Path, history_rows: list[list[st
         ],
     )
 
+    ts_rows = [
+        [
+            r.model,
+            r.query,
+            r.expected,
+            r.chose,
+            "PASS" if r.correct else "FAIL",
+            round(r.latency_ms, 0),
+            round(r.cost_usd, 6),
+        ]
+        for s in scores
+        for r in s.tool_selection_records
+    ]
+    if ts_rows:
+        ts_ws = wb.create_sheet("ToolSelection")
+        _fill(ts_ws, ["Model", "Question", "Expected tool", "Chose", "Result", "Latency ms", "Cost USD"], ts_rows)
+        rng = f"E2:E{len(ts_rows) + 1}"
+        ts_ws.conditional_formatting.add(rng, CellIsRule(operator="equal", formula=['"PASS"'], fill=green))
+        ts_ws.conditional_formatting.add(rng, CellIsRule(operator="equal", formula=['"FAIL"'], fill=red))
+
     trend = wb.create_sheet("Trend")
     for row in history_rows:
         trend.append(row)
@@ -682,7 +806,9 @@ def _write_xlsx(scores: list[ModelScore], path: Path, history_rows: list[list[st
     wb.save(str(path))
 
 
-async def run_evaluation(intent_sample: int, output_path: Path, backend: str) -> None:
+async def run_evaluation(
+    intent_sample: int, output_path: Path, backend: str, tool_selection_sample: int = len(TOOL_SELECTION_CASES)
+) -> None:
     from app.llm_factory import build_llm
 
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
@@ -695,7 +821,14 @@ async def run_evaluation(intent_sample: int, output_path: Path, backend: str) ->
         intent_cases = dataset[::stride][:intent_sample]
     else:
         intent_cases = dataset
-    print(f"Intent cases: {len(intent_cases)} | Grounded cases: {len(GROUNDED_CASES)} | backend: {backend}")
+
+    # Agentic tool-selection runs only on the claude_code backend (Agent SDK).
+    ts_cases = TOOL_SELECTION_CASES[:tool_selection_sample] if tool_selection_sample > 0 else []
+    run_ts = backend == "claude_code" and bool(ts_cases)
+    print(
+        f"Intent cases: {len(intent_cases)} | Grounded cases: {len(GROUNDED_CASES)} | "
+        f"Tool-selection cases: {len(ts_cases) if run_ts else 0} | backend: {backend}"
+    )
 
     if backend == "claude_code":
         models = [(m, build_llm(model=m, provider="claude_code")) for m in CLAUDE_CODE_MODELS]
@@ -707,17 +840,23 @@ async def run_evaluation(intent_sample: int, output_path: Path, backend: str) ->
     scores: list[ModelScore] = []
     for name, llm in models:
         print(f"\n▶ {name}")
-        scores.append(await _evaluate_model(name, llm, judge, intent_cases))
+        score = await _evaluate_model(name, llm, judge, intent_cases)
+        if run_ts:
+            correct, total, records = await _evaluate_tool_selection(name, ts_cases)
+            score.tool_selection_correct, score.tool_selection_total = correct, total
+            score.tool_selection_records = records
+        scores.append(score)
 
     names = ", ".join(s.name for s in scores)
     if backend == "claude_code":
+        ts_note = f" Agentic tool-selection measured on {len(ts_cases)} cases." if run_ts else ""
         scope = (
             f"Claude family only ({names}), via the Claude Code subscription quota. "
             "GPT and Gemini are NOT included — they require metered API keys: run "
-            "`--backend providers` with the relevant keys to add them."
+            "`--backend providers` with the relevant keys to add them." + ts_note
         )
     else:
-        scope = f"Metered provider APIs ({backend}): {names}."
+        scope = f"Metered provider APIs ({backend}): {names}. Agentic tool-selection is Claude-only (not run)."
 
     n = len(intent_cases)
     stem = output_path.with_suffix("")  # e.g. results/model_eval
@@ -746,8 +885,18 @@ def main() -> None:
     parser.add_argument("--intent-sample", type=int, default=24, help="Number of intent cases to test (0 = all)")
     parser.add_argument("--output", type=Path, default=Path("results/model_eval.md"), help="Output markdown file")
     parser.add_argument("--backend", choices=["claude_code", "providers"], default="claude_code")
+    parser.add_argument(
+        "--tool-selection-sample",
+        type=int,
+        default=len(TOOL_SELECTION_CASES),
+        help="Agentic tool-selection cases per model (claude_code only; 0 = skip)",
+    )
+    parser.add_argument(
+        "--no-tool-selection", action="store_true", help="Skip the agentic tool-selection dimension entirely"
+    )
     args = parser.parse_args()
-    asyncio.run(run_evaluation(args.intent_sample, args.output, args.backend))
+    ts_sample = 0 if args.no_tool_selection else args.tool_selection_sample
+    asyncio.run(run_evaluation(args.intent_sample, args.output, args.backend, ts_sample))
 
 
 if __name__ == "__main__":

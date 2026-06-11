@@ -33,6 +33,17 @@ A **composite** score (0–1) combines intent accuracy, the judged dimensions an
 figure overlap; the highest composite is the recommended model. A **value index**
 (composite per USD of estimated cost) highlights the best quality-for-cost.
 
+**3. Agentic tool-selection accuracy** *(claude_code backend only)* — runs the
+**agentic** orchestrator (`AgenticOrchestrator`) over labelled cases
+(`TOOL_SELECTION_CASES`) and checks whether the model **itself** chooses the
+right tool (or no tool for clarify/decline). This is the model-driven counterpart
+to intent classification — see [orchestration.md](orchestration.md). It is
+tracked per round as a `Tool sel.` column (summary + history) and a per-question
+**ToolSelection** sheet / HTML section. Control it with
+`--tool-selection-sample N` (default = all cases) or `--no-tool-selection` to
+skip. It is **not** folded into the composite, so composite stays comparable
+across backends; report it alongside groundedness as a separate dimension.
+
 ## Artifacts (per round)
 
 Each run writes a **timestamped** set plus a **`_latest`** set, and appends to a
