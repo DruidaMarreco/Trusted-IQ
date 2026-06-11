@@ -12,6 +12,13 @@ from dataclasses import dataclass
 # their family's API price (informative; subscription usage is quota-billed).
 _PRICES: dict[str, tuple[float, float]] = {
     "gpt-5": (0.015, 0.060),
+    # Test-matrix models (approximate published prices; cost is an estimate only).
+    "gpt-5.4-mini": (0.00025, 0.002),
+    "gpt-5.4": (0.0025, 0.010),
+    "gpt-5.5": (0.005, 0.015),
+    "gemini-2.5-flash-lite": (0.0001, 0.0004),
+    "gemini-2.5-flash": (0.0003, 0.0025),
+    "gemini-2.5-pro": (0.00125, 0.010),
     "gpt-4o": (0.0025, 0.010),
     "gpt-4o-mini": (0.00015, 0.0006),
     "opus": (0.005, 0.025),

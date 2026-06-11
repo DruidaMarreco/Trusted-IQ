@@ -65,7 +65,12 @@ cumulative history — all under `results/` (gitignored):
 |---|---|---|
 | `claude_code` (default) | Claude Opus / Sonnet / Haiku | Claude Code subscription quota — local CLI session, or `CLAUDE_CODE_OAUTH_TOKEN` in CI (keep `ANTHROPIC_API_KEY` unset) |
 | `azure` | Azure AI Foundry deployments (`AZURE_MODELS`; **auto-skips undeployed**) | `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` |
+| `google` | Gemini (`GOOGLE_MODELS`) | `GOOGLE_API_KEY` |
 | `providers` | GPT-4o, Claude Sonnet (extend in `PROVIDER_MODELS`) | Provider API keys |
+| `matrix` | The cross-vendor `MODEL_MATRIX` (OpenAI/Anthropic/Google × cheap/medium/strong); **auto-skips unreachable** | per-model (Azure / subscription / Google key) |
+
+See the [test matrix](model-landscape.md#test-matrix-prepared-for-future-runs)
+for the candidate models and how to light up each vendor tier.
 
 The `azure` backend "keeps all models open": it probes every candidate in
 `AZURE_MODELS` and silently skips any not deployed in the Foundry resource, so

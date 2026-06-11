@@ -64,11 +64,31 @@ AZURE_MODELS = [
     "gpt-5",
     "gpt-5.1",
     "gpt-5-chat",
+    "gpt-5.4-mini",
+    "gpt-5.4",
+    "gpt-5.5",
     "o4-mini",
     "model-router",
     "DeepSeek-V3",
     "Llama-3.3-70B-Instruct",
     "grok-3",
+]
+# Google Gemini deployments (Google API, not Azure Foundry).
+GOOGLE_MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
+
+# Cross-vendor test matrix: (vendor, tier, backend, model). Each model routes to
+# its own backend; `--backend matrix` runs whatever is reachable and auto-skips
+# the rest (Azure model not deployed, no Google key, etc.).
+MODEL_MATRIX: list[tuple[str, str, str, str]] = [
+    ("OpenAI", "cheap", "azure", "gpt-5.4-mini"),
+    ("OpenAI", "medium", "azure", "gpt-5.4"),
+    ("OpenAI", "strong", "azure", "gpt-5.5"),
+    ("Anthropic", "cheap", "claude_code", "haiku"),
+    ("Anthropic", "medium", "claude_code", "sonnet"),
+    ("Anthropic", "strong", "claude_code", "opus"),
+    ("Google", "cheap", "google", "gemini-2.5-flash-lite"),
+    ("Google", "medium", "google", "gemini-2.5-flash"),
+    ("Google", "strong", "google", "gemini-2.5-pro"),
 ]
 
 # Grounded response cases — each query + the params used to fetch its tool output.
@@ -850,6 +870,31 @@ async def _azure_live_models(candidates: list[str]) -> list[str]:
     return live
 
 
+async def _reachable(backend: str, model: str) -> bool:
+    """Is this (backend, model) callable right now? claude_code is assumed live
+    (subscription quota); metered/deployed backends are probed with a tiny call."""
+    if backend == "claude_code":
+        return True
+    from app.llm_factory import build_llm
+
+    try:
+        await build_llm(model=model, provider=backend).ainvoke("ping")
+        return True
+    except Exception as exc:
+        print(f"  skip {backend}:{model}: {str(exc).splitlines()[0][:70]}")
+        return False
+
+
+async def _resolve_matrix() -> list[tuple[str, str, str]]:
+    """Return reachable matrix entries as (model, backend, vendor/tier label)."""
+    out: list[tuple[str, str, str]] = []
+    for vendor, tier, backend, model in MODEL_MATRIX:
+        if await _reachable(backend, model):
+            print(f"  ✓ {vendor}/{tier}: {backend}:{model}")
+            out.append((model, backend, f"{vendor} {tier}"))
+    return out
+
+
 def _build_ts_agent(backend: str, name: str, llm: BaseChatModel) -> Any:
     """Pick the agentic orchestrator for tool-selection scoring on this backend."""
     if backend == "claude_code":
@@ -886,26 +931,44 @@ async def run_evaluation(
         f"Tool-selection cases: {len(ts_cases) if run_ts else 0} | backend: {backend}"
     )
 
+    # Build the candidate set as (model, model_backend, llm). model_backend is
+    # per-model so 'matrix' can mix providers (and pick the right tool-selection agent).
+    entries: list[tuple[str, str, BaseChatModel]] = []
     if backend == "claude_code":
-        models = [(m, build_llm(model=m, provider="claude_code")) for m in CLAUDE_CODE_MODELS]
+        entries = [(m, "claude_code", build_llm(model=m, provider="claude_code")) for m in CLAUDE_CODE_MODELS]
         judge = build_llm(model="haiku", provider="claude_code")
     elif backend == "azure":
         live = await _azure_live_models(AZURE_MODELS)
         if not live:
             print("No Azure deployments reachable — aborting.")
             return
-        models = [(m, build_llm(model=m, provider="azure")) for m in live]
-        judge = build_llm(model=live[0], provider="azure")  # a deployed model judges
+        entries = [(m, "azure", build_llm(model=m, provider="azure")) for m in live]
+        judge = build_llm(model=live[0], provider="azure")
+    elif backend == "google":
+        live_g = [m for m in GOOGLE_MODELS if await _reachable("google", m)]
+        if not live_g:
+            print("No Google models reachable (set GOOGLE_API_KEY) — aborting.")
+            return
+        entries = [(m, "google", build_llm(model=m, provider="google")) for m in live_g]
+        judge = build_llm(model=live_g[0], provider="google")
+    elif backend == "matrix":
+        reachable = await _resolve_matrix()
+        if not reachable:
+            print("No matrix models reachable — aborting.")
+            return
+        entries = [(model, mb, build_llm(model=model, provider=mb)) for model, mb, _label in reachable]
+        jm, jb = next(((m, mb) for m, mb, _l in reachable if mb == "claude_code"), (reachable[0][0], reachable[0][1]))
+        judge = build_llm(model=jm, provider=jb)  # prefer a free claude_code judge
     else:  # providers (metered API keys)
-        models = [(name, build_llm(model=name, provider=prov)) for prov, name in PROVIDER_MODELS]
+        entries = [(name, "providers", build_llm(model=name, provider=prov)) for prov, name in PROVIDER_MODELS]
         judge = build_llm(model="gpt-4o-mini", provider="openai")
 
     scores: list[ModelScore] = []
-    for name, llm in models:
+    for name, model_backend, llm in entries:
         print(f"\n▶ {name}")
         score = await _evaluate_model(name, llm, judge, intent_cases)
         if run_ts:
-            agent = _build_ts_agent(backend, name, llm)
+            agent = _build_ts_agent(model_backend, name, llm)
             correct, total, records = await _evaluate_tool_selection(name, ts_cases, agent)
             score.tool_selection_correct, score.tool_selection_total = correct, total
             score.tool_selection_records = records
@@ -916,12 +979,19 @@ async def run_evaluation(
     if backend == "claude_code":
         scope = (
             f"Claude family only ({names}), via the Claude Code subscription quota. "
-            "Other providers need their own backend (`--backend azure` / `providers`)." + ts_note
+            "Other providers need their own backend (`--backend azure` / `google` / `matrix`)." + ts_note
         )
     elif backend == "azure":
         scope = (
             f"Azure AI Foundry, OpenAI-compatible ({names}). Undeployed catalog models "
             "were auto-skipped — deploy more in Foundry to include them." + ts_note
+        )
+    elif backend == "google":
+        scope = f"Google Gemini ({names})." + ts_note
+    elif backend == "matrix":
+        scope = (
+            f"Cross-vendor matrix ({names}). Unreachable models (undeployed / no API key) "
+            "were auto-skipped." + ts_note
         )
     else:
         scope = f"Metered provider APIs ({backend}): {names}." + ts_note
@@ -952,7 +1022,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="TradeIQ TPO model evaluation")
     parser.add_argument("--intent-sample", type=int, default=24, help="Number of intent cases to test (0 = all)")
     parser.add_argument("--output", type=Path, default=Path("results/model_eval.md"), help="Output markdown file")
-    parser.add_argument("--backend", choices=["claude_code", "azure", "providers"], default="claude_code")
+    parser.add_argument(
+        "--backend", choices=["claude_code", "azure", "google", "providers", "matrix"], default="claude_code"
+    )
     parser.add_argument(
         "--tool-selection-sample",
         type=int,

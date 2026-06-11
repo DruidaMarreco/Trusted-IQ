@@ -64,6 +64,16 @@ def build_llm(
             **kwargs,
         )
 
+    # Google Gemini (not available via Azure Foundry — uses the Google API key).
+    if resolved_provider in ("google", "google_genai"):
+        google_kwargs: dict[str, Any] = {"api_key": cfg.google_api_key.get_secret_value()}
+        return init_chat_model(  # type: ignore[no-any-return]
+            resolved_model,
+            model_provider="google_genai",
+            **google_kwargs,
+            **kwargs,
+        )
+
     # Proxy mode: one OpenAI-compatible endpoint for all models.
     if cfg.llm_proxy_base_url:
         proxy_kwargs: dict[str, Any] = {

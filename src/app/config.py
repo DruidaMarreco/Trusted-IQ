@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # --- OpenAI direct ---
     openai_api_key: SecretStr = SecretStr("")
 
+    # --- Google Gemini (not served via Azure Foundry) ---
+    google_api_key: SecretStr = SecretStr("")
+
     # --- Anthropic ---
     anthropic_api_key: SecretStr = SecretStr("")
 

@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Google Gemini provider** (`LLM_PROVIDER=google`) + a cross-vendor **test matrix** (`MODEL_MATRIX`: OpenAI/Anthropic/Google × cheap/medium/strong). New eval backends `--backend google` and `--backend matrix` run whatever is reachable and **auto-skip** unavailable models (undeployed Azure / missing Google key). Anthropic tier runs today via the subscription quota; OpenAI (gpt-5.x) awaits Foundry deployment; Gemini awaits `GOOGLE_API_KEY`.
 - **Azure AI Foundry provider** (`LLM_PROVIDER=azure`): calls the Foundry OpenAI-compatible endpoint (`{endpoint}/openai/v1`) by deployment name — any deployed model works by name, "all models open". Thin orchestrator verified end-to-end on `gpt-4o`.
 - **Native tool-calling orchestrator** (`ToolCallingOrchestrator`): provider-agnostic model-driven tool use via LangChain `bind_tools` (Azure/OpenAI/Anthropic API); 4/4 tool-selection on Azure `gpt-4o`
 - **`azure` eval backend**: scores Azure deployments, **auto-skipping any not deployed** (probe `AZURE_MODELS`); tool-selection scored via the backend-appropriate orchestrator; history CSV is schema-migrated so Azure rounds track alongside Claude
