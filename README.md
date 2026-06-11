@@ -41,6 +41,23 @@ user query →│  Intent Classifier  │  (PROMPT-001)
   numbers. This is what the model evaluation measures.
 - Canonical prompts live in [src/app/prompts.py](src/app/prompts.py).
 
+### Two orchestrators
+
+The service ships two orchestrators that differ in **who decides which tool to
+use** — see [docs/orchestration.md](docs/orchestration.md):
+
+- **Thin orchestrator** (`OrchestratorAgent`, **production**) — deterministic:
+  the LLM classifies intent, then code routes to the tool. Provider-agnostic,
+  fully testable; measures **intent-classification accuracy**.
+- **Agentic orchestrator** (`AgenticOrchestrator`) — model-driven: Claude is
+  given the tools and *decides* whether/which to call (native tool use via the
+  Claude Agent SDK, on the subscription quota). Measures **tool-selection
+  accuracy** (latest: 6/6 on Sonnet).
+
+Tools (CDT TextToSQL, ERDC Optimizer) call their **live** service over HTTP when
+configured, and fall back to deterministic **mock** output otherwise — see
+[docs/tools.md](docs/tools.md).
+
 ## Repository layout
 
 ```
@@ -49,12 +66,17 @@ user query →│  Intent Classifier  │  (PROMPT-001)
 ├── .github/workflows/  ci.yml · metrics.yml (disabled) · cd.yml (disabled)
 ├── docs/               architecture, testing, model-evaluation, ADRs, diagrams
 └── src/                all code and tests
-    ├── app/                  the service (FastAPI + orchestrator + tools)
+    ├── app/                  the service
+    │   ├── agents/           orchestrator.py (thin) · agentic_orchestrator.py (model-driven)
+    │   ├── tools/            CDT/ERDC integrations — registry · cdt · erdc · http · mock
+    │   ├── api/routes.py     /agent/invoke
+    │   ├── prompts.py · llm_factory.py · claude_code_llm.py · metrics.py · eval.py · config.py
+    │   └── schemas/models.py
     ├── tests/
     │   ├── unit_testing/     fast, mocked unit tests (no network)
     │   └── data/             ground-truth datasets (intent_dataset.json)
-    ├── integration_testing/  test.py — example calls against the API endpoints
-    └── metrics_testing/      evaluate_models.py — mass model eval + HTML report
+    ├── integration_testing/  test.py (endpoints) · agentic_tool_test.py · tool_stubs.py
+    └── metrics_testing/      evaluate_models.py — mass model eval + artifacts
 ```
 
 ## Quickstart
@@ -83,11 +105,15 @@ See [docs/testing.md](docs/testing.md) for details.
 ## Model evaluation (choose the best model)
 
 `make evaluate` runs the full assistant flow for each candidate model and scores
-them on **intent accuracy, groundedness, relevance and format**, writing
-`results/model_eval.md` and `results/model_eval.html`. Groundedness is judged by
-both an LLM rubric and a deterministic figure-overlap check (every number in the
-answer must appear in the tool output). By default it runs `--backend
-claude_code`, billing the **Claude Code subscription quota** (Opus/Sonnet/Haiku).
+them on **intent accuracy, groundedness, relevance and format**, writing a
+timestamped + `_latest` artifact set per round — **`.md`, `.html`** (chart +
+confusion matrix + per-question tables), **`.xlsx`** (5 sheets) and **`.json`** —
+plus a cross-round `history.csv`. Groundedness is judged by both an LLM rubric
+and a deterministic figure-overlap check (every number in the answer must appear
+in the tool output). By default it runs `--backend claude_code`, billing the
+**Claude Code subscription quota** (Opus/Sonnet/Haiku). Current pick: **Opus**
+(top composite), **Haiku** the cost fallback — see
+[docs/model-evaluation.md](docs/model-evaluation.md#results).
 
 - **Local:** be logged in to the `claude` CLI — auth is automatic.
 - **CI / headless:** set `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`); keep
@@ -103,8 +129,9 @@ Copy `.env.example` to `.env`. Key variables:
 | Variable | Default | Description |
 |---|---|---|
 | `LLM_PROVIDER` | `azure_openai` | `azure_openai` \| `openai` \| `anthropic` \| `claude_code` \| `ollama` |
-| `LLM_MODEL` | `gpt-4o` | Base model for all agents |
+| `LLM_MODEL` | `claude-opus-4-8` | Orchestrator model (pinned by the model evaluation) |
 | `LLM_PROXY_BASE_URL` | _(empty)_ | If set, route all models through one OpenAI-compatible gateway |
+| `CDT_BASE_URL` / `ERDC_BASE_URL` | _(empty)_ | Tool service URLs; **empty = deterministic mock**, set = live HTTP (see [docs/tools.md](docs/tools.md)) |
 | `ENV` / `LOG_LEVEL` | `dev` / `INFO` | Runtime + logging |
 
 ## Development
@@ -121,10 +148,14 @@ all pinned in `uv.lock` and enforced in CI ([.github/workflows/ci.yml](.github/w
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) — the thin-orchestrator design
+- [Architecture](docs/architecture.md) — end-to-end design, both orchestrators, code map
+- [Orchestration](docs/orchestration.md) — thin (deterministic) vs agentic (model-driven) + tool-selection results
+- [Tools](docs/tools.md) — CDT/ERDC integrations: live HTTP + mock fallback, contracts, stubs
 - [Testing](docs/testing.md) — the three testing tiers
-- [Model evaluation](docs/model-evaluation.md) — how models are scored & chosen
-- [Architecture decisions](docs/adr/) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md)
+- [Model evaluation](docs/model-evaluation.md) — how models are scored & chosen, with results
+- [Model landscape](docs/model-landscape.md) — candidate families (GPT / Claude / Gemini)
+- [Architecture decisions](docs/adr/) — ADR-0001 (uv) · ADR-0002 (provider-agnostic factory) · ADR-0003 (agentic vs thin)
+- [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md)
 
 ## License
 
