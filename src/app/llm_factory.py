@@ -49,6 +49,21 @@ def build_llm(
 
         return ChatClaudeCode(model=resolved_model)
 
+    # Azure AI Foundry: OpenAI-compatible endpoint, addressed by *deployment name*
+    # (passed as the model). Keeps "all models open" — any model you deploy in the
+    # Foundry resource is callable by name with no code change.
+    if resolved_provider == "azure":
+        azure_kwargs: dict[str, Any] = {
+            "base_url": cfg.azure_openai_endpoint.rstrip("/") + "/openai/v1",
+            "api_key": cfg.azure_openai_api_key.get_secret_value(),
+        }
+        return init_chat_model(  # type: ignore[no-any-return]
+            resolved_model,
+            model_provider="openai",
+            **azure_kwargs,
+            **kwargs,
+        )
+
     # Proxy mode: one OpenAI-compatible endpoint for all models.
     if cfg.llm_proxy_base_url:
         proxy_kwargs: dict[str, Any] = {

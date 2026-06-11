@@ -53,6 +53,23 @@ INTENT_DATASET_PATH = Path(__file__).parent.parent / "tests" / "data" / "intent_
 # Candidate models per backend.
 CLAUDE_CODE_MODELS = ["opus", "sonnet", "haiku"]
 PROVIDER_MODELS = [("openai", "gpt-4o"), ("anthropic", "claude-sonnet-4-6")]
+# Azure AI Foundry candidate deployments. Listing many "keeps all models open":
+# the eval auto-skips any that aren't deployed, so deploying more in Foundry
+# lights them up here with no code change.
+AZURE_MODELS = [
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-5",
+    "gpt-5.1",
+    "gpt-5-chat",
+    "o4-mini",
+    "model-router",
+    "DeepSeek-V3",
+    "Llama-3.3-70B-Instruct",
+    "grok-3",
+]
 
 # Grounded response cases — each query + the params used to fetch its tool output.
 GROUNDED_CASES: list[dict[str, Any]] = [
@@ -349,13 +366,12 @@ async def _evaluate_model(
 
 
 async def _evaluate_tool_selection(
-    name: str, cases: list[dict[str, Any]]
+    name: str, cases: list[dict[str, Any]], agent: Any
 ) -> tuple[int, int, list[ToolSelectionRecord]]:
-    """Run the AGENTIC orchestrator over labelled cases — does the model pick the
-    right tool itself? Claude Agent SDK only (claude_code backend)."""
-    from app.agents.agentic_orchestrator import AgenticOrchestrator
-
-    agent = AgenticOrchestrator(model=name, cfg=_EVAL_CFG)  # mock tools — we score the choice, not the data
+    """Run an AGENTIC orchestrator over labelled cases — does the model pick the
+    right tool itself? ``agent`` is an AgenticOrchestrator (Claude Agent SDK) or a
+    ToolCallingOrchestrator (native bind_tools, e.g. Azure/OpenAI); both expose
+    ``.run(query)`` returning ``.tool_names`` + ``.metrics``."""
     correct = 0
     records: list[ToolSelectionRecord] = []
     for case in cases:
@@ -567,32 +583,44 @@ _HISTORY_HEADER = [
 ]
 
 
-def _append_history(scores: list[ModelScore], timestamp: str, path: Path) -> list[list[str]]:
-    """Append this round's per-model summary to the cumulative history CSV."""
-    write_header = not path.exists()
-    with path.open("a", newline="", encoding="utf-8") as fh:
+def _append_history(scores: list[ModelScore], timestamp: str, path: Path) -> list[list[Any]]:
+    """Append this round to the cumulative history CSV, rewriting the whole file
+    with the current header. Rows written under an older schema are migrated by
+    column name (missing columns become empty), so the CSV stays consistent even
+    as the dimensions evolve."""
+    prior: list[list[str]] = []
+    if path.exists():
+        with path.open(encoding="utf-8") as fh:
+            existing = list(csv.reader(fh))
+        if existing:
+            old_header = existing[0]
+            for row in existing[1:]:
+                mapped = dict(zip(old_header, row, strict=False))
+                prior.append([mapped.get(col, "") for col in _HISTORY_HEADER])
+
+    new_rows = [
+        [
+            timestamp,
+            s.name,
+            round(s.intent_accuracy * 100, 1),
+            round(s.tool_selection_accuracy * 100, 0) if s.tool_selection_total else "",
+            round(s._avg(s.groundedness), 2),
+            round(s._avg(s.relevance), 2),
+            round(s._avg(s.fmt), 2),
+            round(s._avg(s.figure_overlap) * 100, 0),
+            round(s.avg_latency_ms, 0),
+            round(s.cost_usd, 6),
+            s.value_index,
+            round(s.composite, 3),
+        ]
+        for s in scores
+    ]
+
+    with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        if write_header:
-            writer.writerow(_HISTORY_HEADER)
-        for s in scores:
-            writer.writerow(
-                [
-                    timestamp,
-                    s.name,
-                    round(s.intent_accuracy * 100, 1),
-                    round(s.tool_selection_accuracy * 100, 0) if s.tool_selection_total else "",
-                    round(s._avg(s.groundedness), 2),
-                    round(s._avg(s.relevance), 2),
-                    round(s._avg(s.fmt), 2),
-                    round(s._avg(s.figure_overlap) * 100, 0),
-                    round(s.avg_latency_ms, 0),
-                    round(s.cost_usd, 6),
-                    s.value_index,
-                    round(s.composite, 3),
-                ]
-            )
-    with path.open(encoding="utf-8") as fh:
-        return list(csv.reader(fh))
+        writer.writerow(_HISTORY_HEADER)
+        writer.writerows(prior + new_rows)
+    return [_HISTORY_HEADER, *prior, *new_rows]
 
 
 def _export_json(scores: list[ModelScore], intent_n: int, timestamp: str, backend: str) -> str:
@@ -806,6 +834,33 @@ def _write_xlsx(scores: list[ModelScore], path: Path, history_rows: list[list[st
     wb.save(str(path))
 
 
+async def _azure_live_models(candidates: list[str]) -> list[str]:
+    """Probe each candidate Azure deployment; keep the ones that actually answer.
+    This is how the eval 'keeps all models open' — undeployed names are skipped."""
+    from app.llm_factory import build_llm
+
+    live: list[str] = []
+    for name in candidates:
+        try:
+            await build_llm(model=name, provider="azure").ainvoke("ping")
+            live.append(name)
+            print(f"  azure deployed: {name}")
+        except Exception as exc:
+            print(f"  azure skip {name}: {str(exc).splitlines()[0][:80]}")
+    return live
+
+
+def _build_ts_agent(backend: str, name: str, llm: BaseChatModel) -> Any:
+    """Pick the agentic orchestrator for tool-selection scoring on this backend."""
+    if backend == "claude_code":
+        from app.agents.agentic_orchestrator import AgenticOrchestrator
+
+        return AgenticOrchestrator(model=name, cfg=_EVAL_CFG)
+    from app.agents.tool_calling_orchestrator import ToolCallingOrchestrator
+
+    return ToolCallingOrchestrator(llm=llm, cfg=_EVAL_CFG)
+
+
 async def run_evaluation(
     intent_sample: int, output_path: Path, backend: str, tool_selection_sample: int = len(TOOL_SELECTION_CASES)
 ) -> None:
@@ -822,9 +877,10 @@ async def run_evaluation(
     else:
         intent_cases = dataset
 
-    # Agentic tool-selection runs only on the claude_code backend (Agent SDK).
+    # Tool-selection runs on every backend (Agent SDK for claude_code; native
+    # bind_tools for azure / providers).
     ts_cases = TOOL_SELECTION_CASES[:tool_selection_sample] if tool_selection_sample > 0 else []
-    run_ts = backend == "claude_code" and bool(ts_cases)
+    run_ts = bool(ts_cases)
     print(
         f"Intent cases: {len(intent_cases)} | Grounded cases: {len(GROUNDED_CASES)} | "
         f"Tool-selection cases: {len(ts_cases) if run_ts else 0} | backend: {backend}"
@@ -833,7 +889,14 @@ async def run_evaluation(
     if backend == "claude_code":
         models = [(m, build_llm(model=m, provider="claude_code")) for m in CLAUDE_CODE_MODELS]
         judge = build_llm(model="haiku", provider="claude_code")
-    else:
+    elif backend == "azure":
+        live = await _azure_live_models(AZURE_MODELS)
+        if not live:
+            print("No Azure deployments reachable — aborting.")
+            return
+        models = [(m, build_llm(model=m, provider="azure")) for m in live]
+        judge = build_llm(model=live[0], provider="azure")  # a deployed model judges
+    else:  # providers (metered API keys)
         models = [(name, build_llm(model=name, provider=prov)) for prov, name in PROVIDER_MODELS]
         judge = build_llm(model="gpt-4o-mini", provider="openai")
 
@@ -842,21 +905,26 @@ async def run_evaluation(
         print(f"\n▶ {name}")
         score = await _evaluate_model(name, llm, judge, intent_cases)
         if run_ts:
-            correct, total, records = await _evaluate_tool_selection(name, ts_cases)
+            agent = _build_ts_agent(backend, name, llm)
+            correct, total, records = await _evaluate_tool_selection(name, ts_cases, agent)
             score.tool_selection_correct, score.tool_selection_total = correct, total
             score.tool_selection_records = records
         scores.append(score)
 
     names = ", ".join(s.name for s in scores)
+    ts_note = f" Tool-selection measured on {len(ts_cases)} cases." if run_ts else ""
     if backend == "claude_code":
-        ts_note = f" Agentic tool-selection measured on {len(ts_cases)} cases." if run_ts else ""
         scope = (
             f"Claude family only ({names}), via the Claude Code subscription quota. "
-            "GPT and Gemini are NOT included — they require metered API keys: run "
-            "`--backend providers` with the relevant keys to add them." + ts_note
+            "Other providers need their own backend (`--backend azure` / `providers`)." + ts_note
+        )
+    elif backend == "azure":
+        scope = (
+            f"Azure AI Foundry, OpenAI-compatible ({names}). Undeployed catalog models "
+            "were auto-skipped — deploy more in Foundry to include them." + ts_note
         )
     else:
-        scope = f"Metered provider APIs ({backend}): {names}. Agentic tool-selection is Claude-only (not run)."
+        scope = f"Metered provider APIs ({backend}): {names}." + ts_note
 
     n = len(intent_cases)
     stem = output_path.with_suffix("")  # e.g. results/model_eval
@@ -884,7 +952,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="TradeIQ TPO model evaluation")
     parser.add_argument("--intent-sample", type=int, default=24, help="Number of intent cases to test (0 = all)")
     parser.add_argument("--output", type=Path, default=Path("results/model_eval.md"), help="Output markdown file")
-    parser.add_argument("--backend", choices=["claude_code", "providers"], default="claude_code")
+    parser.add_argument("--backend", choices=["claude_code", "azure", "providers"], default="claude_code")
     parser.add_argument(
         "--tool-selection-sample",
         type=int,

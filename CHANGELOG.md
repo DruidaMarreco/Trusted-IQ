@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Azure AI Foundry provider** (`LLM_PROVIDER=azure`): calls the Foundry OpenAI-compatible endpoint (`{endpoint}/openai/v1`) by deployment name — any deployed model works by name, "all models open". Thin orchestrator verified end-to-end on `gpt-4o`.
+- **Native tool-calling orchestrator** (`ToolCallingOrchestrator`): provider-agnostic model-driven tool use via LangChain `bind_tools` (Azure/OpenAI/Anthropic API); 4/4 tool-selection on Azure `gpt-4o`
+- **`azure` eval backend**: scores Azure deployments, **auto-skipping any not deployed** (probe `AZURE_MODELS`); tool-selection scored via the backend-appropriate orchestrator; history CSV is schema-migrated so Azure rounds track alongside Claude
 - **Thin orchestrator** (`OrchestratorAgent`): classify intent (PROMPT-001) → route → grounded response (PROMPT-002), with four intents (`DATA_QUERY`, `OPTIMIZER_RUN`, `CLARIFICATION`, `OUT_OF_SCOPE`)
 - **Agentic orchestrator** (`AgenticOrchestrator`): model-driven native tool use via the Claude Agent SDK on the subscription quota; tool-selection test scoring 6/6 on Sonnet
 - **Tool integration layer** (`app/tools/`): CDT TextToSQL + ERDC Optimizer over HTTP with **mock fallback**, retries, `Bearer` auth, `ToolError`, and runnable contract stubs (`tool_stubs.py`)

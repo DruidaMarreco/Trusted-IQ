@@ -33,10 +33,12 @@ A **composite** score (0–1) combines intent accuracy, the judged dimensions an
 figure overlap; the highest composite is the recommended model. A **value index**
 (composite per USD of estimated cost) highlights the best quality-for-cost.
 
-**3. Agentic tool-selection accuracy** *(claude_code backend only)* — runs the
-**agentic** orchestrator (`AgenticOrchestrator`) over labelled cases
-(`TOOL_SELECTION_CASES`) and checks whether the model **itself** chooses the
-right tool (or no tool for clarify/decline). This is the model-driven counterpart
+**3. Agentic tool-selection accuracy** *(every backend)* — runs the **agentic**
+orchestrator over labelled cases (`TOOL_SELECTION_CASES`) and checks whether the
+model **itself** chooses the right tool (or no tool for clarify/decline). The
+orchestrator is backend-appropriate: `AgenticOrchestrator` (Claude Agent SDK) for
+`claude_code`, `ToolCallingOrchestrator` (native `bind_tools`) for `azure` /
+`providers`. This is the model-driven counterpart
 to intent classification — see [orchestration.md](orchestration.md). It is
 tracked per round as a `Tool sel.` column (summary + history) and a per-question
 **ToolSelection** sheet / HTML section. Control it with
@@ -62,7 +64,18 @@ cumulative history — all under `results/` (gitignored):
 | `--backend` | Models | Auth |
 |---|---|---|
 | `claude_code` (default) | Claude Opus / Sonnet / Haiku | Claude Code subscription quota — local CLI session, or `CLAUDE_CODE_OAUTH_TOKEN` in CI (keep `ANTHROPIC_API_KEY` unset) |
+| `azure` | Azure AI Foundry deployments (`AZURE_MODELS`; **auto-skips undeployed**) | `AZURE_OPENAI_ENDPOINT` + `AZURE_OPENAI_API_KEY` |
 | `providers` | GPT-4o, Claude Sonnet (extend in `PROVIDER_MODELS`) | Provider API keys |
+
+The `azure` backend "keeps all models open": it probes every candidate in
+`AZURE_MODELS` and silently skips any not deployed in the Foundry resource, so
+deploying more models lights them up with no code change. Tool-selection on
+`azure`/`providers` uses the native `ToolCallingOrchestrator` (`bind_tools`);
+on `claude_code` it uses the Claude Agent SDK `AgenticOrchestrator`.
+
+Example `azure` round (only `gpt-4o` deployed today): intent 83%, **tool-selection
+100%**, groundedness 5.0/5, composite 0.918, value 40.4 — far cheaper/faster
+(~2s/turn) than the Claude rounds; tracked alongside them in the Trend.
 
 Because grounding comes from `tool_output` (not native tool-calling), the eval
 is uniform across every backend — no provider needs special handling.
